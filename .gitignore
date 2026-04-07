@@ -1,0 +1,79 @@
+# Secrets and credentials
+.secrets/
+.pgpass
+*.pem
+*.key
+*.p12
+*.pfx
+*.env
+.env.*
+
+# Local assistant state / private workspace context
+memory/
+IDENTITY.md
+USER.md
+BOOTSTRAP.md
+TOOLS.md
+AGENTS.md
+SOUL.md
+HEARTBEAT.md
+.openclaw/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.npm/
+
+# Local caches
+.cache/
+.local/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs and runtime output
+logs/
+*.log
+transform-run.log
+extract-season.log
+
+# Generated reports / downloads / browser output
+browser-downloads/
+reports/
+media/
+
+# Large / local datasets
+# Keep schema and code, not raw local data dumps
+/data/lenex/
+/data/processed/
+/data/tmp/
+/data/export/
+
+# Databases / local artifacts
+*.sqlite
+*.sqlite3
+*.db
+
+# Misc temporary files
+*.tmp
+*.bak
+*.orig
