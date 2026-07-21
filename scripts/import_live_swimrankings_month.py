@@ -27,6 +27,8 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 from import_live_swimrankings_meet import (
+    build_age_group_rankings,
+    build_event_age_groups,
     canonical_swimmer_id,
     extract_meet_metadata,
     load_root_from_lxf_bytes,
@@ -34,6 +36,12 @@ from import_live_swimrankings_meet import (
     parse_int,
     sanitize_filename,
     time_to_seconds,
+)
+from import_Swiss_NationalRecords import (
+    DEFAULT_COURSES as DEFAULT_RECORD_COURSES,
+    DEFAULT_RECORD_LIST_IDS,
+    print_summary as print_record_summary,
+    sync_swimrankings_records,
 )
 
 
@@ -408,10 +416,105 @@ def save_lxf(save_dir: Path, live_id: str, meet_name: str, meet_date: Optional[s
     return path
 
 
+def parse_result_splits(result) -> List[Tuple[int, object, int]]:
+    split_rows: List[Tuple[int, object, int]] = []
+    splits = result.find("SPLITS")
+    if splits is None:
+        return split_rows
+
+    for split_order, split in enumerate(splits.findall("SPLIT"), 1):
+        distance = parse_int(split.get("distance"))
+        split_seconds = time_to_seconds(split.get("swimtime"))
+        if distance is None or split_seconds is None:
+            continue
+        split_rows.append((distance, split_seconds, split_order))
+    return split_rows
+
+
 def build_meet_id(meet_name: str, meet_date: Optional[str]) -> str:
     if meet_date:
         return f"{meet_name}_{meet_date}".replace(" ", "_")[:100]
     return meet_name.replace(" ", "_")[:100]
+
+
+def fetch_result_ids(cur, rows: Sequence[Tuple[object, ...]]) -> Dict[int, int]:
+    if not rows:
+        return {}
+
+    lookup_rows = [
+        (index, row[0], row[1], row[2], row[5], row[3], row[7])
+        for index, row in enumerate(rows)
+    ]
+    found_rows = execute_values(
+        cur,
+        """
+        WITH input_rows(row_index, swimmer_id, meet_id, event_id, heat, time_seconds, result_date) AS (
+            VALUES %s
+        )
+        SELECT input_rows.row_index, r.id
+          FROM input_rows
+          JOIN results r
+            ON r.swimmer_id = input_rows.swimmer_id
+           AND r.meet_id = input_rows.meet_id
+           AND r.event_id = input_rows.event_id
+           AND (
+                (input_rows.heat IS NOT NULL AND r.heat = input_rows.heat)
+                OR (
+                    input_rows.heat IS NULL
+                    AND r.heat IS NULL
+                    AND r.result_date IS NOT DISTINCT FROM input_rows.result_date::date
+                    AND ABS(r.time_seconds - input_rows.time_seconds) < 0.0001
+                )
+           )
+         ORDER BY input_rows.row_index, r.id
+        """,
+        lookup_rows,
+        page_size=1000,
+        fetch=True,
+    )
+
+    result_ids: Dict[int, int] = {}
+    ambiguous_indexes = set()
+    for row_index, result_id in found_rows:
+        if row_index in result_ids:
+            ambiguous_indexes.add(row_index)
+            continue
+        result_ids[row_index] = result_id
+
+    for row_index in ambiguous_indexes:
+        result_ids.pop(row_index, None)
+    return result_ids
+
+
+def replace_result_splits(cur, rows: Sequence[Tuple[object, ...]]) -> None:
+    result_ids = fetch_result_ids(cur, rows)
+    split_values = []
+    result_ids_with_splits = set()
+
+    for index, row in enumerate(rows):
+        splits = row[9]
+        if not splits:
+            continue
+        result_id = result_ids.get(index)
+        if result_id is None:
+            continue
+        result_ids_with_splits.add(result_id)
+        for distance, split_seconds, split_order in splits:
+            split_values.append((result_id, distance, split_seconds, split_order))
+
+    if not split_values:
+        return
+
+    cur.execute("DELETE FROM splits WHERE result_id = ANY(%s)", (list(result_ids_with_splits),))
+    execute_values(
+        cur,
+        """
+        INSERT INTO splits (result_id, distance, time_seconds, split_order)
+        VALUES %s
+        """,
+        split_values,
+        page_size=1000,
+    )
 
 
 def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False) -> ImportSummary:
@@ -496,7 +599,8 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
         meet_db_id = ensure_meet(cur, meet_id, meet_name, meet_city, meet_nation, meet_date, pool_length)
 
         event_cache: Dict[str, int] = {}
-        event_meta: Dict[str, Tuple[int, str, str, int]] = {}
+        event_meta: Dict[str, Tuple[int, str, str, int, bool, Optional[int]]] = {}
+        event_rounds: Dict[str, Optional[str]] = {}
         for event in root.findall(".//EVENT"):
             source_event_id = (event.get("eventid") or "").strip()
             swimstyle = event.find("SWIMSTYLE")
@@ -505,10 +609,25 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
             distance = parse_int(swimstyle.get("distance")) or 0
             stroke = (swimstyle.get("stroke") or "FREE").strip().upper()
             gender = normalize_gender(event.get("gender"), "U")
-            event_meta[source_event_id] = (distance, stroke, gender, pool_length)
+            relay_count = parse_int(swimstyle.get("relaycount")) or 1
+            event_meta[source_event_id] = (
+                distance,
+                stroke,
+                gender,
+                pool_length,
+                relay_count > 1,
+                relay_count if relay_count > 1 else None,
+            )
+            event_rounds[source_event_id] = (event.get("round") or "").strip().upper() or None
 
-        result_rows: List[Tuple[int, int, int, object, Optional[int], Optional[int], Optional[int], Optional[str]]] = []
+        # Some LENEX files, including Swiss national championships, store
+        # placements in EVENT/AGEGROUPS/RANKINGS rather than on RESULT itself.
+        ranking_map = build_age_group_rankings(root)
+        event_age_groups = build_event_age_groups(root)
+
+        result_rows: List[Tuple[object, ...]] = []
         unique_swimmers = set()
+        selected_athletes: Dict[str, int] = {}
         for athlete in iter_athletes(root):
             first_name = (athlete.get("firstname") or "").strip()
             last_name = (athlete.get("lastname") or "").strip()
@@ -524,6 +643,8 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
             ensure_country(cur, nation)
             swimmer_pk = resolve_swimmer(cur, athlete_id, first_name, last_name, birth_year, nation, gender)
             unique_swimmers.add(swimmer_pk)
+            if athlete_id:
+                selected_athletes[athlete_id] = swimmer_pk
 
             results_elem = athlete.find("RESULTS")
             if results_elem is None:
@@ -533,7 +654,7 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                 if source_event_id not in event_meta:
                     continue
                 if source_event_id not in event_cache:
-                    distance, stroke, event_gender, event_pool_length = event_meta[source_event_id]
+                    distance, stroke, event_gender, event_pool_length, _, _ = event_meta[source_event_id]
                     event_cache[source_event_id] = ensure_event(cur, distance, stroke, event_gender, event_pool_length)
                 swimtime_text = (result.get("swimtime") or "").strip()
                 time_seconds = time_to_seconds(swimtime_text)
@@ -542,6 +663,11 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                 rank = parse_int(result.get("rank")) or parse_int(result.get("place"))
                 heat = parse_int(result.get("heatid"))
                 lane = parse_int(result.get("lane"))
+                reaction_time = (result.get("reactiontime") or "").strip() or None
+                split_rows = parse_result_splits(result)
+                age_group_info = ranking_map.get(
+                    (source_event_id, (result.get("resultid") or "").strip())
+                ) or event_age_groups.get(source_event_id)
                 result_rows.append(
                     (
                         swimmer_pk,
@@ -552,8 +678,73 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                         heat,
                         lane,
                         meet_date,
+                        reaction_time,
+                        split_rows,
+                        age_group_info.source_age_group_id if age_group_info else None,
+                        age_group_info.age_group_min if age_group_info else None,
+                        age_group_info.age_group_max if age_group_info else None,
+                        age_group_info.age_group_label if age_group_info else None,
+                        age_group_info.age_group_rank if age_group_info else None,
+                        age_group_info.age_group_order if age_group_info else None,
+                        event_rounds.get(source_event_id),
+                        False,
+                        None,
                     )
                 )
+
+        # Relay teams are separate LENEX records. Associate each team result
+        # with every selected member referenced by RELAYPOSITION.
+        for relay in root.findall(".//RELAY"):
+            for result in relay.findall("./RESULTS/RESULT"):
+                source_event_id = (result.get("eventid") or "").strip()
+                if source_event_id not in event_meta:
+                    continue
+                distance, stroke, event_gender, event_pool_length, is_relay, relay_count = event_meta[source_event_id]
+                if not is_relay:
+                    continue
+                if source_event_id not in event_cache:
+                    event_cache[source_event_id] = ensure_event(
+                        cur, distance, stroke, event_gender, event_pool_length
+                    )
+                time_seconds = time_to_seconds((result.get("swimtime") or "").strip())
+                if time_seconds is None or time_seconds <= 0:
+                    continue
+                age_group_info = ranking_map.get(
+                    (source_event_id, (result.get("resultid") or "").strip())
+                ) or event_age_groups.get(source_event_id)
+                rank = parse_int(result.get("rank")) or parse_int(result.get("place"))
+                heat = parse_int(result.get("heatid"))
+                lane = parse_int(result.get("lane"))
+                reaction_time = (result.get("reactiontime") or "").strip() or None
+                split_rows = parse_result_splits(result)
+
+                for position in result.findall("./RELAYPOSITIONS/RELAYPOSITION"):
+                    swimmer_pk = selected_athletes.get((position.get("athleteid") or "").strip())
+                    if swimmer_pk is None:
+                        continue
+                    result_rows.append(
+                        (
+                            swimmer_pk,
+                            meet_db_id,
+                            event_cache[source_event_id],
+                            time_seconds,
+                            rank,
+                            heat,
+                            lane,
+                            meet_date,
+                            reaction_time,
+                            split_rows,
+                            age_group_info.source_age_group_id if age_group_info else None,
+                            age_group_info.age_group_min if age_group_info else None,
+                            age_group_info.age_group_max if age_group_info else None,
+                            age_group_info.age_group_label if age_group_info else None,
+                            age_group_info.age_group_rank if age_group_info else None,
+                            age_group_info.age_group_order if age_group_info else None,
+                            event_rounds.get(source_event_id),
+                            True,
+                            relay_count,
+                        )
+                    )
 
         deduped_rows = []
         seen = set()
@@ -568,17 +759,47 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
             execute_values(
                 cur,
                 """
-                INSERT INTO results (swimmer_id, meet_id, event_id, time_seconds, rank, heat, lane, result_date)
+                INSERT INTO results (
+                    swimmer_id,
+                    meet_id,
+                    event_id,
+                    time_seconds,
+                    rank,
+                    heat,
+                    lane,
+                    result_date,
+                    reaction_time,
+                    age_group_id,
+                    age_group_min,
+                    age_group_max,
+                    age_group_label,
+                    age_group_rank,
+                    age_group_order,
+                    event_round,
+                    is_relay,
+                    relay_count
+                )
                 VALUES %s
                 ON CONFLICT (swimmer_id, meet_id, event_id, heat) DO UPDATE SET
                     time_seconds=EXCLUDED.time_seconds,
                     rank=EXCLUDED.rank,
                     lane=EXCLUDED.lane,
-                    result_date=EXCLUDED.result_date
+                    result_date=EXCLUDED.result_date,
+                    reaction_time=COALESCE(EXCLUDED.reaction_time, results.reaction_time),
+                    age_group_id=EXCLUDED.age_group_id,
+                    age_group_min=EXCLUDED.age_group_min,
+                    age_group_max=EXCLUDED.age_group_max,
+                    age_group_label=EXCLUDED.age_group_label,
+                    age_group_rank=EXCLUDED.age_group_rank,
+                    age_group_order=EXCLUDED.age_group_order,
+                    event_round=EXCLUDED.event_round,
+                    is_relay=EXCLUDED.is_relay,
+                    relay_count=EXCLUDED.relay_count
                 """,
-                deduped_rows,
+                [row[:9] + row[10:] for row in deduped_rows],
                 page_size=1000,
             )
+            replace_result_splits(cur, deduped_rows)
 
         cur.execute(
             """
@@ -637,6 +858,41 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include meets whose start date is after --through-date.",
     )
+    parser.add_argument(
+        "--skip-records",
+        dest="skip_records",
+        action="store_true",
+        help="Emergency flag: skip the official records sync before live meet import.",
+    )
+    parser.add_argument(
+        "--skip-swiss-records",
+        dest="skip_records",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--record-list-ids",
+        nargs="+",
+        default=list(DEFAULT_RECORD_LIST_IDS),
+        help="SwimRankings record list ids to sync before importing live meets.",
+    )
+    parser.add_argument(
+        "--swiss-record-list-id",
+        dest="legacy_swiss_record_list_id",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--record-courses",
+        nargs="+",
+        default=list(DEFAULT_RECORD_COURSES),
+        help="Official record courses to sync before importing live meets. Default: LCM SCM.",
+    )
+    parser.add_argument(
+        "--swiss-record-courses",
+        dest="record_courses",
+        nargs="+",
+        help=argparse.SUPPRESS,
+    )
     return parser
 
 
@@ -661,6 +917,26 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
     args = build_parser().parse_args()
+    db_url: Optional[str] = None
+
+    record_list_ids = (
+        [args.legacy_swiss_record_list_id]
+        if args.legacy_swiss_record_list_id
+        else args.record_list_ids
+    )
+
+    if not args.skip_records:
+        if not args.dry_run:
+            db_url = get_db_url(args)
+        record_results = sync_swimrankings_records(
+            db_url=db_url,
+            record_list_ids=record_list_ids,
+            courses=args.record_courses,
+            dry_run=args.dry_run,
+        )
+        for record_result in record_results:
+            print_record_summary(record_result)
+
     meets = [
         meet
         for meet in fetch_live_meets(args.index_url)
@@ -670,13 +946,15 @@ def main() -> int:
     meets.sort(key=lambda meet: (meet.start_date, meet.live_id))
 
     print(
-        f"APRIL_IMPORT_PLAN year={args.year} month={args.month} through={args.through_date} meets={len(meets)} dry_run={args.dry_run}",
+        f"LIVE_IMPORT_PLAN year={args.year} month={args.month} through={args.through_date} meets={len(meets)} dry_run={args.dry_run}",
         flush=True,
     )
     if not meets:
         return 0
 
-    conn = psycopg2.connect(get_db_url(args))
+    if db_url is None:
+        db_url = get_db_url(args)
+    conn = psycopg2.connect(db_url)
     try:
         summaries = [import_meet(conn, meet, args.save_dir, args.dry_run) for meet in meets]
     finally:

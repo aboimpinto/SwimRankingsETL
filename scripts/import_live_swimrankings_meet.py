@@ -61,6 +61,9 @@ class EventInfo:
     stroke: str
     gender: str
     pool_length: int
+    event_round: Optional[str]
+    is_relay: bool
+    relay_count: Optional[int]
 
 
 def normalize_gender(value: Optional[str], fallback: str = "U") -> str:
@@ -516,10 +519,13 @@ def upsert_results_rows(cur, rows: Sequence[Tuple[object, ...]]) -> None:
             age_group_max,
             age_group_label,
             age_group_rank,
-            age_group_order
+            age_group_order,
+            event_round,
+            is_relay,
+            relay_count
         )
         VALUES (
-            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
         )
         ON CONFLICT (swimmer_id, meet_id, event_id, heat) DO UPDATE SET
             time_seconds=EXCLUDED.time_seconds,
@@ -537,7 +543,10 @@ def upsert_results_rows(cur, rows: Sequence[Tuple[object, ...]]) -> None:
             age_group_max=EXCLUDED.age_group_max,
             age_group_label=EXCLUDED.age_group_label,
             age_group_rank=EXCLUDED.age_group_rank,
-            age_group_order=EXCLUDED.age_group_order
+            age_group_order=EXCLUDED.age_group_order,
+            event_round=EXCLUDED.event_round,
+            is_relay=EXCLUDED.is_relay,
+            relay_count=EXCLUDED.relay_count
         """,
         rows,
     )
@@ -555,11 +564,11 @@ def collect_filtered_rows(
     Dict[Tuple[str, str], AgeGroupInfo],
     Dict[str, AgeGroupInfo],
     List[Tuple[Optional[str], ET.Element, int]],
-    Dict[str, Tuple[int, str, str, int]],
+    Dict[str, Tuple[int, str, str, int, Optional[str], bool, Optional[int]]],
 ]:
     ranking_map = build_age_group_rankings(root)
     event_age_groups = build_event_age_groups(root)
-    event_meta: Dict[str, Tuple[int, str, str, int]] = {}
+    event_meta: Dict[str, Tuple[int, str, str, int, Optional[str], bool, Optional[int]]] = {}
     for event in root.findall(".//EVENT"):
         event_id = (event.get("eventid") or "").strip()
         swimstyle = event.find("SWIMSTYLE")
@@ -568,7 +577,17 @@ def collect_filtered_rows(
         distance = parse_int(swimstyle.get("distance")) or 0
         stroke = (swimstyle.get("stroke") or "FREE").strip().upper()
         gender = normalize_gender(event.get("gender"), "U")
-        event_meta[event_id] = (distance, stroke, gender, pool_length)
+        event_round = (event.get("round") or "").strip().upper() or None
+        relay_count = parse_int(swimstyle.get("relaycount")) or 1
+        event_meta[event_id] = (
+            distance,
+            stroke,
+            gender,
+            pool_length,
+            event_round,
+            relay_count > 1,
+            relay_count if relay_count > 1 else None,
+        )
 
     metadata = extract_meet_metadata(root)
     agedate_value = metadata["agedate_value"]
@@ -719,6 +738,7 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
         raw_rows: List[Tuple[object, ...]] = []
         final_rows: List[Tuple[object, ...]] = []
         unique_swimmers = set()
+        selected_athletes: Dict[str, Tuple[int, str, str, str, int, str, str]] = {}
 
         for club_name, athlete, athlete_age in filtered_athletes:
             del club_name, athlete_age
@@ -744,6 +764,16 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                 gender=gender,
             )
             unique_swimmers.add(swimmer_pk)
+            if athlete_id:
+                selected_athletes[athlete_id] = (
+                    swimmer_pk,
+                    first_name,
+                    last_name,
+                    birthdate,
+                    birth_year,
+                    nation,
+                    gender,
+                )
 
             results_elem = athlete.find("RESULTS")
             if results_elem is None:
@@ -753,7 +783,15 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                 if source_event_id not in event_meta:
                     continue
                 if source_event_id not in event_cache:
-                    distance, stroke, event_gender, event_pool_length = event_meta[source_event_id]
+                    (
+                        distance,
+                        stroke,
+                        event_gender,
+                        event_pool_length,
+                        event_round,
+                        is_relay,
+                        relay_count,
+                    ) = event_meta[source_event_id]
                     event_db_id = ensure_event(cur, distance, stroke, event_gender, event_pool_length)
                     event_cache[source_event_id] = EventInfo(
                         event_db_id=event_db_id,
@@ -761,6 +799,9 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                         stroke=stroke,
                         gender=event_gender,
                         pool_length=event_pool_length,
+                        event_round=event_round,
+                        is_relay=is_relay,
+                        relay_count=relay_count,
                     )
 
                 event_info = event_cache[source_event_id]
@@ -849,8 +890,109 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                         age_group_info.age_group_label,
                         age_group_info.age_group_rank,
                         age_group_info.age_group_order,
+                        event_info.event_round,
+                        False,
+                        None,
                     )
                 )
+
+        # LENEX stores relay teams separately from ATHLETE/RESULTS. Create one
+        # canonical team result for every selected athlete referenced by a relay.
+        for relay in root.findall(".//RELAY"):
+            for result in relay.findall("./RESULTS/RESULT"):
+                source_event_id = (result.get("eventid") or "").strip()
+                if source_event_id not in event_meta:
+                    continue
+                if source_event_id not in event_cache:
+                    (
+                        distance,
+                        stroke,
+                        event_gender,
+                        event_pool_length,
+                        event_round,
+                        is_relay,
+                        relay_count,
+                    ) = event_meta[source_event_id]
+                    event_db_id = ensure_event(cur, distance, stroke, event_gender, event_pool_length)
+                    event_cache[source_event_id] = EventInfo(
+                        event_db_id=event_db_id,
+                        distance=distance,
+                        stroke=stroke,
+                        gender=event_gender,
+                        pool_length=event_pool_length,
+                        event_round=event_round,
+                        is_relay=is_relay,
+                        relay_count=relay_count,
+                    )
+
+                event_info = event_cache[source_event_id]
+                if not event_info.is_relay:
+                    continue
+
+                swimtime_text = (result.get("swimtime") or "").strip() or None
+                time_seconds = time_to_seconds(swimtime_text)
+                if time_seconds is None or time_seconds <= 0:
+                    continue
+
+                age_group_info = ranking_map.get(
+                    (source_event_id, (result.get("resultid") or "").strip())
+                ) or event_age_groups.get(source_event_id) or AgeGroupInfo(
+                    None, None, None, None, None, None
+                )
+                status = (result.get("status") or "").strip() or None
+                lane = parse_int(result.get("lane"))
+                heat_id = parse_int(result.get("heatid"))
+                points = parse_decimal(result.get("points"))
+                entry_time_seconds = time_to_seconds(result.get("entrytime"))
+                reaction_time = (result.get("reactiontime") or "").strip() or None
+                source_result_id = (result.get("resultid") or "").strip() or None
+                rank = parse_int(result.get("rank")) or parse_int(result.get("place"))
+
+                for position in result.findall("./RELAYPOSITIONS/RELAYPOSITION"):
+                    athlete_id = (position.get("athleteid") or "").strip()
+                    athlete_info = selected_athletes.get(athlete_id)
+                    if athlete_info is None:
+                        continue
+                    (
+                        swimmer_pk,
+                        first_name,
+                        last_name,
+                        birthdate,
+                        birth_year,
+                        nation,
+                        gender,
+                    ) = athlete_info
+                    raw_rows.append(
+                        (
+                            raw_file_id, athlete_id, nation, first_name, last_name,
+                            birthdate or None, birth_year, gender, meet_name, meet_nation,
+                            meet_date, source_event_id, event_info.distance, event_info.stroke,
+                            event_info.gender, event_info.pool_length, swimtime_text,
+                            time_seconds, lane, swimmer_pk, meet_db_id, event_info.event_db_id,
+                            status, points, None, entry_time_seconds, reaction_time, None,
+                            source_result_id, rank, heat_id,
+                            age_group_info.source_age_group_id,
+                            age_group_info.age_group_min,
+                            age_group_info.age_group_max,
+                            age_group_info.age_group_label,
+                            age_group_info.age_group_rank,
+                            age_group_info.age_group_order,
+                        )
+                    )
+                    final_rows.append(
+                        (
+                            swimmer_pk, meet_db_id, event_info.event_db_id, time_seconds,
+                            rank, heat_id, lane, meet_date, status, points, None,
+                            entry_time_seconds, reaction_time, None,
+                            age_group_info.source_age_group_id,
+                            age_group_info.age_group_min,
+                            age_group_info.age_group_max,
+                            age_group_info.age_group_label,
+                            age_group_info.age_group_rank,
+                            age_group_info.age_group_order,
+                            event_info.event_round, True, event_info.relay_count,
+                        )
+                    )
 
         deduped_rows: List[Tuple[object, ...]] = []
         seen = set()
@@ -864,6 +1006,8 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                 row[8] or "",
                 row[10] or "",
                 row[14] or "",
+                row[21],
+                row[22] or 0,
             )
             if key in seen:
                 continue
