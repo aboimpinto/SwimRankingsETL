@@ -403,6 +403,7 @@ CREATE TABLE IF NOT EXISTS swimrankings_delivery.audit (
  publisher text NOT NULL, meet_key text NOT NULL, revision integer NOT NULL,
  sha256 text NOT NULL, before_digest text, applied_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(publisher,meet_key,revision));
+ALTER TABLE swimrankings_delivery.meets ADD COLUMN IF NOT EXISTS affected_from date;
 """
 
 
@@ -549,6 +550,16 @@ def apply_package(conn, packet, commit=False, adopt_existing=False):
                 (target_meet,),
             )
             rev_swimmer = {v: k for k, v in swimmer_ids.items()}
+            dates = [r["result_date"] for r in [*current, *p["results"]]]
+            if not dates:
+                dates = [p["meet"]["start_date"]]
+            if old and old["needs_summary_refresh"]:
+                dates.append(old["affected_from"])
+            affected_from = (
+                min(str(d)[:10] for d in dates)
+                if all(d is not None for d in dates)
+                else None
+            )
             rev_event = {v: k for k, v in event_ids.items()}
             natural = {}
             for row in current:
@@ -661,6 +672,10 @@ def apply_package(conn, packet, commit=False, adopt_existing=False):
                 "deleted": deleted,
                 "summary_refresh_required": True,
             }
+            cur.execute(
+                "UPDATE swimrankings_delivery.meets SET affected_from=%s WHERE publisher=%s AND meet_key=%s",
+                (affected_from, publisher, key),
+            )
         if commit:
             conn.commit()
         else:
@@ -696,7 +711,7 @@ def push(args):
         return subprocess.run(
             ["ssh", "-o", "BatchMode=yes", args.ssh_host, shlex.join(argv)],
             check=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
             text=True,
         ).stdout
 
@@ -722,11 +737,34 @@ def push(args):
             "bytes": sum(p.stat().st_size for p, _ in packages),
             "destination": args.ssh_host,
         }
-    ssh(["python3", "-c", "import psycopg2"])
+    python = getattr(args, "remote_python", "python3")
+    ssh([python, "-c", "import psycopg2"])
     ssh(["mkdir", "-p", args.remote_dir])
     runner = Path(__file__).resolve()
     remote_runner = f"{args.remote_dir}/meet_delivery-{hashlib.sha256(runner.read_bytes()).hexdigest()}.py"
-    scp(runner, remote_runner)
+    if getattr(args, "publish_config", None):
+        files = [
+            runner,
+            *[
+                runner.with_name(name)
+                for name in (
+                    "publish_delivery.py",
+                    "delivery_summaries.py",
+                    "delivery_summary_schema.sql",
+                )
+            ],
+        ]
+        bundle = digest(
+            [hashlib.sha256(path.read_bytes()).hexdigest() for path in files]
+        )
+        runtime = f"{args.remote_dir}/runtime-{bundle}"
+        ssh(["mkdir", "-p", runtime])
+        for path in files:
+            scp(path, f"{runtime}/{path.name}.part")
+            ssh(["mv", f"{runtime}/{path.name}.part", f"{runtime}/{path.name}"])
+        remote_runner = f"{runtime}/meet_delivery.py"
+    else:
+        scp(runner, remote_runner)
     common = [
         "--config",
         args.remote_config,
@@ -735,7 +773,7 @@ def push(args):
         "--expect-database",
         args.expect_database,
     ]
-    state = json.loads(ssh(["python3", remote_runner, "status", *common]))
+    state = json.loads(ssh([python, remote_runner, "status", *common]))
     known = {(r["publisher"], r["meet_key"]): r for r in state}
     sent = []
     for path, packet in packages:
@@ -754,7 +792,7 @@ def push(args):
         reply = json.loads(
             ssh(
                 [
-                    "python3",
+                    python,
                     remote_runner,
                     "apply",
                     *common,
@@ -766,13 +804,33 @@ def push(args):
         )
         sent.append(reply)
         known[key] = {"revision": packet["revision"], "sha256": packet["sha256"]}
-    return {"status": "complete", "uploaded": len(sent), "meets": sent}
+    publication = None
+    if getattr(args, "publish_config", None):
+        publication = json.loads(
+            ssh(
+                [
+                    python,
+                    remote_runner,
+                    "publish",
+                    *common,
+                    "--consumers-config",
+                    args.publish_config,
+                    "--commit",
+                ]
+            )
+        )
+    return {
+        "status": "complete",
+        "uploaded": len(sent),
+        "meets": sent,
+        "publication": publication,
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    for action in ["export", "apply", "status"]:
+    for action in ["export", "apply", "status", "publish"]:
         cmd = sub.add_parser(action)
         cmd.add_argument(
             "--config", required=True, help="Local JSON connection file; never uploaded"
@@ -783,6 +841,17 @@ def main():
             cmd.add_argument("--meet-id", type=int, action="append", required=True)
             cmd.add_argument("--publisher", required=True)
             cmd.add_argument("--directory", required=True)
+        elif action == "publish":
+            cmd.add_argument(
+                "--consumers-config",
+                required=True,
+                help="Private destination JSON file with all three website URLs/tokens",
+            )
+            cmd.add_argument(
+                "--commit",
+                action="store_true",
+                help="Otherwise show pending work without summaries or HTTP calls",
+            )
         elif action == "apply":
             cmd.add_argument("--package", required=True)
             cmd.add_argument(
@@ -808,6 +877,15 @@ def main():
     cmd.add_argument(
         "--commit", action="store_true", help="Otherwise print a local transfer plan"
     )
+    cmd.add_argument(
+        "--publish-config",
+        help="Private consumers JSON path on the destination; enables summary/website publication after upload",
+    )
+    cmd.add_argument(
+        "--remote-python",
+        default="python3",
+        help="Destination Python executable, e.g. a virtual environment path",
+    )
     args = parser.parse_args()
     try:
         if args.action == "push":
@@ -817,7 +895,7 @@ def main():
                 args.config,
                 args.expect_host,
                 args.expect_database,
-                readonly=args.action != "apply",
+                readonly=args.action not in ("apply", "publish"),
             )
             try:
                 if args.action == "export":
@@ -831,11 +909,19 @@ def main():
                         args.commit,
                         args.adopt_existing,
                     )
+                elif args.action == "publish":
+                    from publish_delivery import consumers, publish
+
+                    report = publish(
+                        conn, consumers(args.consumers_config), args.commit
+                    )
                 else:
                     report = remote_status(conn)
             finally:
                 conn.close()
         print(json.dumps(report, ensure_ascii=False))
+        if isinstance(report, dict) and report.get("status") == "failed":
+            return 1
     except Exception as exc:
         # Database/transport exception text can contain credentials or row values.
         print(

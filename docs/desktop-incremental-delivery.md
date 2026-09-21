@@ -132,29 +132,100 @@ failure. Use `status` with the same connection arguments to inspect receipts.
   mistake by correcting the desktop and exporting a new revision, or restore a
   verified backup. Do not edit receipts or replay an older revision as rollback.
 
-## Derived summaries and website refresh are separate
+## Publish summaries and all three websites
 
-Successful raw-data delivery records `needs_summary_refresh=true`. It is not a
-claim that website caches or comparison summaries are refreshed. The existing
-`rebuild_points_summary.py` globally rebuilds tables and derives seasons from
-meet start dates. Do not automatically run it for this delivery: boundary-spanning
-meets require session-date handling and consumers need coordinated refresh.
+Install `requirements-delivery.txt` in the receiver Python environment. Keep the
+writer connection JSON and consumer configuration on the receiver, mode 0600.
+Consumer configuration is an array of exactly three objects: `name` (`sophia`,
+`colin`, `limmatsharks`), `url`, and `token`. URLs require HTTPS, or loopback HTTP
+when the publisher runs on the same host. Tokens require at least 32 characters.
+Never put tokens in URLs or command arguments. Redirects are refused.
 
-Before publishing the new data to websites, implement/verify the summary refresh
-for affected seasons, then refresh **active** application caches. Preserve closed
-archive rows. This transport intentionally has no command to clear the pending
-flag without such verified work. AWS deployment/first real upload remains a
-separate run with its actual endpoint, schema, backup and refresh path verified.
-Tracked in [issue #2](https://github.com/aboimpinto/SwimRankingsETL/issues/2).
+Each app exposes `POST /api/integrations/swimrankings/refresh`. Sophia uses
+`CRON_IMPORT_TOKEN`, Colin uses `REFRESH_TOKEN`, and Sharks uses
+`SWIMRANKINGS_REFRESH_TOKEN`. The request is version 1 with a SHA-256 `batchId`
+and earliest changed session date `affectedFrom` (null means unknown/history
+must be reconsidered). A successful response acknowledges that exact batch.
+The publisher allows 900 seconds for each consumer; configure reverse proxies
+accordingly, or use the local container ports from the AWS host.
+
+```bash
+python3 scripts/meet_delivery.py push \
+  --directory data/export/desktop-canonical \
+  --ssh-host aws-swimming \
+  --remote-dir /srv/incoming/swimrankings \
+  --remote-python /srv/swimrankings/venv/bin/python \
+  --remote-config /srv/private/swimrankings.json \
+  --publish-config /srv/private/website-consumers.json \
+  --expect-host 127.0.0.1 --expect-database swimrankingsdb
+```
+
+Review the plan, then add `--commit`. This transfers only missing revisions and
+installs a content-addressed receiver bundle. Stage messages appear on stderr;
+stdout is the JSON receipt. Omitting `--publish-config` performs raw delivery only.
+
+Summary rebuilding uses **each race's session date**, September–August, including
+separate per-meet aggregate rows when a meet crosses the season boundary.
+Undated/invalid/relay results do not enter individual points populations; an
+unknown affected date conservatively invalidates historical peer caches.
+The five derived points/percentile/band tables rebuild globally once per batch
+inside one transaction. This retains all available historical comparisons;
+only raw transport is incremental. Full summary rebuilding trades extra server
+work for correctness until measured volume justifies per-season optimization.
+No raw partitions or whole-database replacement are required.
+
+The same transaction records exact source revisions in
+`swimrankings_delivery.publications`, queues all three consumers, and clears
+`needs_summary_refresh`. Website completion is separately recorded in
+`swimrankings_delivery.notifications`; clearing the raw flag alone never proves
+website completion. The publication holds the shared delivery advisory lock
+through all callbacks. Keep other canonical writers quiescent because legacy
+importers may not honor that lock.
+
+All consumers refresh current/career comparisons even without an own-athlete
+result. Historical corrections invalidate current career peer baselines. Closed
+archive snapshots remain unchanged; this workflow never reopens a season.
+
+### Retry and diagnosis
+
+Rerun the same push after a failure. Raw receipts skip already-applied meets,
+summary publication is retained, and only unfinished consumers run again. A
+lost HTTP response may cause a safe repeat of an already committed app refresh.
+There is no distributed transaction across websites: one site can finish before
+another. The command exits nonzero until all queued consumers acknowledge.
+
+For receiver-only retries use `meet_delivery.py publish --consumers-config ...`
+with the usual explicit target/config flags and `--commit`. Without `--commit`
+it reports pending work without summary writes or HTTP calls. Inspect:
+
+```sql
+SELECT batch_id,consumer,state,attempts,error,completed_at
+FROM swimrankings_delivery.notifications ORDER BY batch_id,consumer;
+SELECT batch_id,revisions,summary FROM swimrankings_delivery.publications;
+```
+
+HTTP 401/503 means token/configuration needs repair; 409 means another refresh
+or closure holds the app lock; 500 or a transport timeout leaves the consumer
+pending for retry. Stored errors contain only exception types, never tokens.
+An endpoint change with outstanding receipts requires explicit operator
+reconciliation; do not silently redirect bearer credentials.
+
+Before the first production run, verify host/database/schema, take canonical
+and application backups, restore a representative backup to an isolated database,
+and exercise actual SSH delivery there. Compare closed archive hashes before
+and after production import. Retain manifests, summary counts and consumer
+receipts as evidence. A corrected desktop export/new revision is the ordinary
+way to reverse a bad competition; never edit delivery receipts to force replay.
 
 ## Tests
 
 ```bash
 DELIVERY_TEST_CONFIG=/private/delivery-test.json \
-  python3 -m unittest discover -s tests -p test_meet_delivery.py -v
+  python3 -m unittest discover -s tests -p 'test_*delivery*.py' -v
 ```
 
-Integration tests refuse hosts other than localhost/127.0.0.1 and databases whose
-name does not start with `swimrankings_delivery_test`. They reset only the isolated
-test schema. CI runs the same contract against PostgreSQL 16. Transport tests mock
-SSH; the real AWS transport has not yet been exercised.
+Tests refuse nonlocal hosts and databases outside `swimrankings_delivery_test*`.
+CI covers PostgreSQL transactions, season-boundary summaries, missing dates,
+invalid races, failed-consumer retry, revision manifests, HTTP acknowledgement
+and redirect refusal. Website repositories independently test their protected
+endpoint and archive-preserving database refresh.
