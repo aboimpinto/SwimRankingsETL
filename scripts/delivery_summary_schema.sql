@@ -125,3 +125,6 @@ ALTER TABLE athlete_meet_points ADD COLUMN IF NOT EXISTS season_end_year integer
 ALTER TABLE athlete_meet_points DROP CONSTRAINT IF EXISTS athlete_meet_points_swimmer_id_meet_id_course_distance_stro_key;
 CREATE UNIQUE INDEX IF NOT EXISTS athlete_meet_points_season_identity
  ON athlete_meet_points(season_end_year,swimmer_id,meet_id,course,distance,stroke);
+
+-- Club history loads each result's ordered splits; avoid one full scan per race.
+CREATE INDEX IF NOT EXISTS splits_result_order_idx ON splits (result_id, split_order);
