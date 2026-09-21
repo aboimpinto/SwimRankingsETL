@@ -47,6 +47,7 @@ class Publication(unittest.TestCase):
             self.conn, CONFIG, True, send=lambda c, n: sent.append((c["name"], n))
         )
         self.assertEqual(result["status"], "complete")
+        self.assertEqual(self.scalar("SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='splits_result_order_idx'"),1)
         self.assertEqual({c for c, n in sent}, set(CONFIG))
         self.assertTrue(all(n["affectedFrom"] == "2026-08-31" for c, n in sent))
         self.assertEqual(
