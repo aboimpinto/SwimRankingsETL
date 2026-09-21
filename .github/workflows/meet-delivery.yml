@@ -5,8 +5,12 @@ on:
   pull_request:
     paths:
       - scripts/meet_delivery.py
+      - scripts/publish_delivery.py
+      - scripts/delivery_summaries.py
+      - scripts/delivery_summary_schema.sql
       - requirements-delivery.txt
       - tests/test_meet_delivery.py
+      - tests/test_delivery_publication.py
       - tests/fixtures/delivery_schema.sql
       - .github/workflows/meet-delivery.yml
 permissions:
@@ -42,4 +46,4 @@ jobs:
       - name: Validate packages and PostgreSQL transactions
         env:
           DELIVERY_TEST_CONFIG: ${{ runner.temp }}/delivery-test.json
-        run: python -m unittest discover -s tests -p test_meet_delivery.py -v
+        run: python -m unittest discover -s tests -p 'test_*delivery*.py' -v
