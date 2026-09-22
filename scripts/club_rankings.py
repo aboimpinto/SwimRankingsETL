@@ -165,7 +165,7 @@ def collect(output,cdp,age_groups=AGES):
   browser=pw.chromium.connect_over_cdp(cdp);page=next(p for p in browser.contexts[0].pages if 'www.swimrankings.net'==urlparse(p.url).hostname)
   def fetch(url,path,validate):
    if path.exists():
-    result=path.read_text();validate(result);return result
+    result=path.read_bytes().decode('utf-8');validate(result);return result
    result=page.evaluate('''async url=>{const r=await fetch(url,{credentials:'include'});if(!r.ok)throw Error('Source unavailable');return await r.text()}''',url)
    if 'rankingList' not in result:
     denied=output/'unavailable.html';denied.write_text(result);denied.chmod(0o600)
