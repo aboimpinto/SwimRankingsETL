@@ -4,6 +4,9 @@ on:
     branches: [main, feat/desktop-incremental-delivery]
   pull_request:
     paths:
+      - scripts/club_record_baselines.py
+      - scripts/collect_club_records.py
+      - tests/test_club_record_delivery.py
       - scripts/meet_delivery.py
       - scripts/publish_delivery.py
       - scripts/delivery_summaries.py
