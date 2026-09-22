@@ -679,6 +679,7 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
 
         raw_file_name = f"{filename_stem}.lxf"
         file_hash = hashlib.sha1(raw_bytes).hexdigest()
+        club_source = hashlib.sha256(raw_bytes).hexdigest()
         cur.execute("SELECT id FROM raw_import_files WHERE file_name=%s", (raw_file_name,))
         row = cur.fetchone()
         if row:
@@ -898,7 +899,7 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                         False,
                         None,
                         club_name,
-                        hashlib.sha256(raw_bytes).hexdigest(),
+                        club_source,
                     )
                 )
 
