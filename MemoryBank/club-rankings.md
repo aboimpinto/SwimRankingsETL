@@ -85,3 +85,30 @@ AWS. On 22 September the operator confirmed ordinary navigation to the age-15
 category also returned an access denial (reference `2026-09-22/13-03-45-000`).
 Collection is stopped; retain the saved files and resume once access is restored.
 Do not use the complete **record-holder** baseline as a complete **ranking** list.
+
+## Deploy-now saved exports (22 September)
+
+Full external acquisition continues in issue 11. The deploy-now release also
+imports **all** validated rows from the 36 saved Excel exports: 26,629 individual
+entries, rather than just the record holders. Their historical coverage is
+explicitly partial, even for short lists without independent pagination proof.
+
+```bash
+python3 scripts/club_export_rankings.py export \
+  --manifest data/export/club-records-2026-09-22/manifest.json \
+  --output data/export/club-records-2026-09-22/ranking-exports.json
+python3 scripts/club_export_rankings.py apply \
+  --package data/export/club-records-2026-09-22/ranking-exports.json \
+  --db-config .secrets/localserver.json
+# Repeat with --commit. Apply the same immutable package on AWS.
+```
+
+`club_ranking_export_imports` is an append-only package ledger with SHA-256
+idempotency. It preserves all source revisions and never changes full Open
+populations, canonical meets/results, app rosters or archives. Grant the app
+source reader SELECT. No app migration or database replacement is involved.
+The website selects each athlete's best verified swim in each exact-age category
+and lifetime Open, labels partial rankings and keeps full source evidence.
+
+Validation: 52 passing ETL contract tests, including real PostgreSQL dry-run,
+retry and revision retention, raw-export validation, tampering and truncation.
