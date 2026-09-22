@@ -9,6 +9,7 @@ Important repo boundary:
 - The newer `import_live_swimrankings_meet.py` and `import_live_swimrankings_month.py` scripts can download public LENEX result files from SwimRankings live endpoints before importing them.
 
 Files in this folder:
+- `club-rankings.md`: complete all-time Open rankings, pagination and per-performance club evidence.
 - `club-record-baselines.md`: desktop collection, validation and incremental publication of official club-record baselines.
 - `projectbrief.md`: high-level project description and scope.
 - `productContext.md`: why the project exists and what it needs to achieve.

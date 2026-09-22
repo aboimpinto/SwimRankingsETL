@@ -137,7 +137,7 @@ def workbook_rows(path):
             sheets.append((sheet.get('name'), rows))
         return sheets, created_at, date1904
 
-def read_export(path, url):
+def read_export(path, url, include_performances=False):
     path = Path(path)
     if path.stat().st_size > MAX_BYTES: raise ValueError('Export too large')
     parsed = urlparse(url); params = parse_qs(parsed.query)
@@ -182,6 +182,7 @@ def read_export(path, url):
         best = min((c['time_cs'] for c in candidates),default=None)
         holders = list({canonical(c):c for c in candidates if c['time_cs']==best}.values())
         events.append({**event,'key':key,'status':'ready' if holders else 'empty','holders':sorted(holders,key=lambda c:(c['date'],c['full_name']))})
+        if include_performances: events[-1]['performances'] = candidates
     required = standard_events(course)
     if not any(name == 'Top Results' for name, _ in sheets) or not events:
         raise ValueError('Expected an all-strokes export with summary sheet')
