@@ -45,6 +45,9 @@ class Parsing(unittest.TestCase):
         p=cm.build([source()]);p['payload']['sources'][0]['performances'][0]['time_cs']=0
         with self.assertRaises(ValueError):cm.validate(p)
         with self.assertRaises(ValueError):cm.validate(cm.build(p['payload']['sources']))
+    def test_unknown_nationality_is_not_inferred_from_club_country(self):
+        s=source(XML.replace('nation="SUI" gender="F"','gender="F"'))
+        self.assertIsNone(s['performances'][0]['country_code'])
     def test_course_and_age_boundaries(self):
         for course in ('SCM','LCM'):
             for birth in ('2000','2011','2015'):

@@ -72,7 +72,7 @@ def read_file(path):
                         cs=seconds*100
                         if not cs.is_finite() or cs<=0 or cs!=int(cs):continue
                     except Exception:continue
-                    p=dict(first_name=first,last_name=last,birth_year=birth,country_code=athlete.get('nation') or club.get('nation') or None,
+                    p=dict(first_name=first,last_name=last,birth_year=birth,country_code=athlete.get('nation') or None,
                         gender=gender,course=course,distance=event[0],stroke=event[1],date=event[2],time_cs=int(cs),club_id=65634,
                         meet=meet.get('name','').strip(),city=meet.get('city','').strip(),meet_country=meet.get('nation',''),round=event[4],heat=result.get('heatid',''),
                         source_sha256=sha,source_athlete_id=athlete.get('athleteid',''),source_result_id=result.get('resultid',''))
