@@ -542,6 +542,7 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
     pool_length = int(meta["pool_length"])
     meet_id = build_meet_id(meet_name, meet_date)
     file_hash = hashlib.sha1(raw_bytes).hexdigest()
+    club_source = hashlib.sha256(raw_bytes).hexdigest()
     if existing_path:
         saved_path = existing_path
     elif dry_run:
@@ -595,6 +596,7 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                 reason=source_ref,
             )
 
+        cur.execute("ALTER TABLE results ADD COLUMN IF NOT EXISTS club_name text, ADD COLUMN IF NOT EXISTS club_source text, ADD COLUMN IF NOT EXISTS status text")
         ensure_country(cur, meet_nation)
         meet_db_id = ensure_meet(cur, meet_id, meet_name, meet_city, meet_nation, meet_date, pool_length)
 
@@ -625,6 +627,10 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
         ranking_map = build_age_group_rankings(root)
         event_age_groups = build_event_age_groups(root)
 
+        club_names = {id(athlete): (club.get("name") or "").strip() or None
+                      for club in root.findall(".//CLUB") for athlete in club.findall("./ATHLETES/ATHLETE")}
+        event_dates = {(event.get("eventid") or "").strip(): session.get("date") or meet_date
+                       for session in root.findall(".//SESSION") for event in session.findall(".//EVENT")}
         result_rows: List[Tuple[object, ...]] = []
         unique_swimmers = set()
         selected_athletes: Dict[str, int] = {}
@@ -677,7 +683,7 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                         rank,
                         heat,
                         lane,
-                        meet_date,
+                        event_dates.get(source_event_id, meet_date),
                         reaction_time,
                         split_rows,
                         age_group_info.source_age_group_id if age_group_info else None,
@@ -689,6 +695,9 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                         event_rounds.get(source_event_id),
                         False,
                         None,
+                        club_names.get(id(athlete)),
+                        club_source if club_names.get(id(athlete)) else None,
+                        (result.get("status") or "").strip() or None,
                     )
                 )
 
@@ -743,6 +752,9 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                             event_rounds.get(source_event_id),
                             True,
                             relay_count,
+                            None,
+                            None,
+                            (result.get("status") or "").strip() or None,
                         )
                     )
 
@@ -777,7 +789,10 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                     age_group_order,
                     event_round,
                     is_relay,
-                    relay_count
+                    relay_count,
+                    club_name,
+                    club_source,
+                    status
                 )
                 VALUES %s
                 ON CONFLICT (swimmer_id, meet_id, event_id, heat) DO UPDATE SET
@@ -794,7 +809,10 @@ def import_meet(conn, live_meet: LiveMeet, save_dir: Path, dry_run: bool = False
                     age_group_order=EXCLUDED.age_group_order,
                     event_round=EXCLUDED.event_round,
                     is_relay=EXCLUDED.is_relay,
-                    relay_count=EXCLUDED.relay_count
+                    relay_count=EXCLUDED.relay_count,
+                    club_name=EXCLUDED.club_name,
+                    club_source=EXCLUDED.club_source,
+                    status=EXCLUDED.status
                 """,
                 [row[:9] + row[10:] for row in deduped_rows],
                 page_size=1000,

@@ -6,6 +6,7 @@ on:
     paths:
       - scripts/club_rankings.py
       - scripts/import_live_swimrankings_meet.py
+      - scripts/import_live_swimrankings_month.py
       - tests/test_club_rankings_delivery.py
       - scripts/club_record_baselines.py
       - scripts/collect_club_records.py
