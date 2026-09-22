@@ -2,7 +2,7 @@
 
 This folder captures durable context for `SwimRankingsETL`.
 
-These notes are based on the repository contents inspected on 2026-04-12. They document the ETL/import side of the project that reads LENEX/XML meet files, transforms them into canonical data, and imports them into PostgreSQL.
+Start with the [project overview](../README.md) and [desktop-to-AWS delivery runbook](../docs/desktop-incremental-delivery.md). They describe localServer imports, incremental AWS delivery and required refresh acknowledgements from SophiaWalker, Colin and LimmatSharks. Older individual notes may describe earlier repository snapshots.
 
 Important repo boundary:
 - Most historical scripts start from already-downloaded files stored under paths such as `/workspace/data/lenex` and `/workspace/data/processed`.

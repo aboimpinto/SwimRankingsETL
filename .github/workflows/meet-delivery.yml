@@ -4,6 +4,11 @@ on:
     branches: [main, feat/desktop-incremental-delivery]
   pull_request:
     paths:
+      - README.md
+      - MemoryBank/README.md
+      - MemoryBank/projectbrief.md
+      - docs/desktop-incremental-delivery.md
+      - docs/club-meet-performances.md
       - scripts/club_meet_performances.py
       - tests/test_club_meet_performances_delivery.py
       - scripts/club_export_rankings.py

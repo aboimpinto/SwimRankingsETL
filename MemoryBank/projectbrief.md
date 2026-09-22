@@ -1,43 +1,28 @@
 # Project Brief
 
-## Project
+SwimRankingsETL supplies the canonical swimming data used by SophiaWalker, Colin
+and LimmatSharks. The [project README](../README.md) describes the complete
+production workflow; [the delivery runbook](../docs/desktop-incremental-delivery.md)
+contains executable commands and recovery procedures.
 
-`SwimRankingsETL` is a small Python ETL repository focused on importing swim meet result data into a PostgreSQL database.
+The desktop downloads SwimRankings data or reads saved LENEX/XML files, resolves
+canonical identities, and imports meets, athletes, events, results, points and
+splits into localServer PostgreSQL. Authentication and interactive browser
+sessions stay on the desktop.
 
-## What the code currently does
+Versioned per-competition packages carry new results and corrections to AWS
+PostgreSQL. Publication rebuilds summaries and triggers all three application
+refresh endpoints, even for meets without a tracked athlete. Each application
+updates current/career rankings and caches while preserving closed archives.
+Durable source and consumer receipts support safe retries and identify partial
+completion. Include `--publish-config` in publishing pushes; raw delivery alone
+does not refresh the websites.
 
-The scripts in this repository:
-- Read LENEX-style meet files (`.lxf`, `.lef`, `.xml`), including zipped LENEX payloads.
-- Extract meet metadata such as name, date, country, city, and course length.
-- Extract athlete, event, and result records from each meet file.
-- Normalize fields like gender, pool length, and swim times.
-- Resolve swimmers into canonical database records, sometimes using alias tables.
-- Optionally stage raw source rows before writing final normalized results.
-- Repair or backfill missing metadata after imports.
-- Download and import public live SwimRankings LENEX result files for specific meets or a whole calendar month.
+Additional tools collect club records/ranking baselines and retain additive
+performance evidence from historical exports and LENEX files. Coverage is limited
+to imported evidence; partial historical rankings remain labelled accordingly.
 
-## Primary goal
-
-Convert swim meet files into database records that are usable for downstream ranking, analytics, validation, and reporting workflows.
-
-## Main outputs
-
-The scripts write into database tables including:
-- `countries`
-- `meets`
-- `events`
-- `swimmers`
-- `swimmer_aliases`
-- `results`
-- `raw_import_files`
-- `raw_results`
-- `processing_log`
-
-## Scope limits visible in this checkout
-
-The current repository does not show:
-- A packaged application or service layer.
-- Automated scheduling or orchestration.
-- Tests or formal runbooks.
-
-Based on the checked-in code, this repo is primarily the import and cleanup layer. A small live-import path now covers public SwimRankings LENEX downloads, but there is still no scheduled acquisition service.
+The repository includes operational documentation and PostgreSQL contract tests.
+It does not provide a scheduled acquisition service or move browser sessions to
+AWS. The application repositories own website presentation, managed rosters,
+season closure and prepared profile caches.
