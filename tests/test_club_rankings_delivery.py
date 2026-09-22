@@ -167,3 +167,21 @@ class CollectionAccess(unittest.TestCase):
    self.assertEqual(target.read_bytes(),original)
    self.assertTrue((root/'unavailable.html').exists())
    self.assertEqual((root/'unavailable.html').stat().st_mode & 0o777,0o600)
+
+class CachedPageProvenance(unittest.TestCase):
+ def test_crlf_cached_pages_keep_original_hash_when_resumed(self):
+  import hashlib,tempfile
+  from types import ModuleType
+  from unittest.mock import MagicMock,patch
+  catalog='''<td class="titleLeft">Limmat Sharks Zuerich</td><td class="titleLeft">Women, 15 years</td><td class="titleRight">Long Course (50m)</td><td class="titleRight">Alltime</td><td class="titleCenter">Top Times</td><table class="rankingList"><a href="?page=rankingDetail&amp;rankingClubId=123&amp;firstPlace=1">50m Freestyle</a></table>\r\n'''
+  html='''<td class="titleLeft">Limmat Sharks Zuerich</td><td class="titleLeft">Women, 15 years</td><td class="titleRight">Long Course (50m)</td><td class="titleRight">Alltime</td><td class="titleCenter">50m Freestyle</td><td class="titleLeftNormal">Last built 20 Jul 2026</td><table class="navigation"><tr><td>Places from 1 to 1</td></tr></table><table class="rankingList"><tr class="rankingList0"><td><a href="?athleteId=1">EXAMPLE, Alex</a></td><td>2011</td><td>SUI</td><td>Limmat Sharks Zuerich</td><td><a href="?id=2">30.00</a></td><td>500</td><td>2.</td><td>1.</td><td>1.</td><td>1 Jan 2026</td><td><a href="?meetId=3" title="Example meet">Example city</a></td></tr></table>\r\n'''
+  browser=Mock();page=Mock();page.url='https://www.swimrankings.net/index.php';page.evaluate.return_value='<h1>No access available</h1>';browser.contexts=[Mock(pages=[page])]
+  pw=Mock();pw.chromium.connect_over_cdp.return_value=browser;context=MagicMock();context.__enter__.return_value=pw
+  module=ModuleType('playwright.sync_api');module.sync_playwright=Mock(return_value=context)
+  with tempfile.TemporaryDirectory() as folder,patch.dict(sys.modules,{'playwright':ModuleType('playwright'),'playwright.sync_api':module}):
+   root=Path(folder);(root/'LCM-F-15_15-catalog.html').write_bytes(catalog.encode());(root/'LCM-F-15_15-50-FREE-1.html').write_bytes(html.encode())
+   with self.assertRaisesRegex(ValueError,'collection stopped'):cr.collect(root,'http://127.0.0.1:9334',['15_15'])
+   package=json.loads((root/'rankings.json').read_bytes());cr.validate_package(package)
+   self.assertEqual(package['payload']['populations'][0]['pages'][0]['sha256'],hashlib.sha256(html.encode()).hexdigest())
+   self.assertEqual(package['payload']['catalogs'][0]['sha256'],hashlib.sha256(catalog.encode()).hexdigest())
+   self.assertEqual(page.evaluate.call_count,1)
