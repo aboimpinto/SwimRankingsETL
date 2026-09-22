@@ -188,6 +188,7 @@ def snapshot(conn, meet_id):
                     "results": [
                         dict(
                             selected(r, RESULT),
+                            **({"club_name": r["club_name"], "club_source": r["club_source"]} if r.get("club_name") and r.get("club_source") else {}),
                             source_id=r["id"],
                             swimmer_key=by_swimmer[r["swimmer_id"]],
                             event_key=by_event[r["event_id"]],
@@ -246,8 +247,12 @@ def validate(packet):
         payload["swimmers"], lambda r: r["swimmer_id"], (*SWIMMER, "club")
     )
     events = unique(payload["events"], lambda r: r["key"], (*EVENT, "key"))
+    for race in payload["results"]:
+        proof = {k: race[k] for k in ("club_name", "club_source") if k in race}
+        if proof and (set(proof) != {"club_name", "club_source"} or not isinstance(proof["club_name"], str) or not proof["club_name"].strip() or len(proof["club_name"]) > 300 or not re.fullmatch(r"[a-f0-9]{64}", proof["club_source"] or "")):
+            raise ValueError("Invalid per-performance club evidence")
     results = unique(
-        payload["results"],
+        [{k:v for k,v in r.items() if k not in ("club_name", "club_source")} for r in payload["results"]],
         lambda r: r["source_id"],
         (*RESULT, "source_id", "swimmer_key", "event_key"),
     )
@@ -289,7 +294,7 @@ def validate(packet):
         raise ValueError("Missing country dependencies")
     # A stable signature permits adoption without replacing destination result IDs.
     unique(
-        payload["results"], race_key, (*RESULT, "source_id", "swimmer_key", "event_key")
+        [{k:v for k,v in r.items() if k not in ("club_name", "club_source")} for r in payload["results"]], race_key, (*RESULT, "source_id", "swimmer_key", "event_key")
     )
     return packet
 
@@ -404,6 +409,8 @@ CREATE TABLE IF NOT EXISTS swimrankings_delivery.audit (
  sha256 text NOT NULL, before_digest text, applied_at timestamptz NOT NULL DEFAULT now(),
  PRIMARY KEY(publisher,meet_key,revision));
 ALTER TABLE swimrankings_delivery.meets ADD COLUMN IF NOT EXISTS affected_from date;
+ALTER TABLE public.results ADD COLUMN IF NOT EXISTS club_name text;
+ALTER TABLE public.results ADD COLUMN IF NOT EXISTS club_source text;
 """
 
 
@@ -600,6 +607,7 @@ def apply_package(conn, packet, commit=False, adopt_existing=False):
                 target = mapping.get(race["source_id"]) or natural.get(race_key(race))
                 values = dict(
                     selected(race, RESULT),
+                    club_name=race.get("club_name"), club_source=race.get("club_source"),
                     swimmer_id=swimmer_ids[race["swimmer_key"]],
                     event_id=event_ids[race["event_key"]],
                     meet_id=target_meet,

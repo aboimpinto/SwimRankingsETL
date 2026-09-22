@@ -497,6 +497,8 @@ def insert_raw_result_rows(cur, rows: Sequence[Tuple[object, ...]]) -> None:
 def upsert_results_rows(cur, rows: Sequence[Tuple[object, ...]]) -> None:
     if not rows:
         return
+    cur.execute("ALTER TABLE results ADD COLUMN IF NOT EXISTS club_name text; ALTER TABLE results ADD COLUMN IF NOT EXISTS club_source text")
+    rows = [tuple(row) + (None, None) if len(row) == 23 else row for row in rows]
     cur.executemany(
         """
         INSERT INTO results (
@@ -522,10 +524,10 @@ def upsert_results_rows(cur, rows: Sequence[Tuple[object, ...]]) -> None:
             age_group_order,
             event_round,
             is_relay,
-            relay_count
+            relay_count, club_name, club_source
         )
         VALUES (
-            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+            %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
         )
         ON CONFLICT (swimmer_id, meet_id, event_id, heat) DO UPDATE SET
             time_seconds=EXCLUDED.time_seconds,
@@ -546,7 +548,8 @@ def upsert_results_rows(cur, rows: Sequence[Tuple[object, ...]]) -> None:
             age_group_order=EXCLUDED.age_group_order,
             event_round=EXCLUDED.event_round,
             is_relay=EXCLUDED.is_relay,
-            relay_count=EXCLUDED.relay_count
+            relay_count=EXCLUDED.relay_count,
+            club_name=EXCLUDED.club_name, club_source=EXCLUDED.club_source
         """,
         rows,
     )
@@ -740,8 +743,9 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
         unique_swimmers = set()
         selected_athletes: Dict[str, Tuple[int, str, str, str, int, str, str]] = {}
 
+        event_dates = {event.get('eventid'): session.get('date') for session in root.findall('.//SESSION') for event in session.findall('./EVENTS/EVENT')}
         for club_name, athlete, athlete_age in filtered_athletes:
-            del club_name, athlete_age
+            del athlete_age
             first_name = (athlete.get("firstname") or "").strip()
             last_name = (athlete.get("lastname") or "").strip()
             if not first_name or not last_name:
@@ -877,7 +881,7 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                         rank,
                         heat_id,
                         lane,
-                        meet_date,
+                        event_dates.get(source_event_id) or meet_date,
                         status,
                         points,
                         qualification,
@@ -893,6 +897,8 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
                         event_info.event_round,
                         False,
                         None,
+                        club_name,
+                        hashlib.sha256(raw_bytes).hexdigest(),
                     )
                 )
 
