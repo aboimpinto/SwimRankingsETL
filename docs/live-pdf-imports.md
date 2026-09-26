@@ -112,6 +112,12 @@ refreshes. Run the SwimProfiles maintenance importer afterward so it sees the
 new canonical data and atomically publishes its changed-meet generation.
 
 Receipts describe the subset actually imported, not full provider coverage.
+Schema setup is committed before the shared summary rebuild, releasing its
+otherwise long-lived lock on canonical race results. The session advisory lock
+still serializes delivery and publication. Summary-table reads may still wait
+for the existing TRUNCATE-based rebuild; this does not make that rebuild fully
+nonblocking.
+
 No destructive database reset or bulk refresh of unrelated archives is needed.
 Before an operational batch, retain its plans and a database backup. Preserve
 source FINA points; any separate local score calculation needs its own receipt.
