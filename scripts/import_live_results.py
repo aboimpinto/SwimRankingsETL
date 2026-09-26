@@ -220,6 +220,9 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                           is_relay=event['is_relay'],relay_count=event['relay_count'],
                           club_name=row['club'] if row['source_kind']=='lenex' else None,
                           club_source=row['source_hash'] if row['source_kind']=='lenex' else None)
+            if entry['before'] and Decimal(str(entry['before']['time_seconds'])) != Decimal(row['time_seconds']):
+                # A previously calculated score must not survive a corrected time.
+                values['points_rudolph'] = None
             if row['source_kind']=='lenex':
                 values.update({k:row.get(k) for k in ('age_group_id','age_group_min','age_group_max','age_group_order','qualification','entry_time_seconds','comment')})
             # PDFs do not replace richer optional fields; LENEX supplies source values.

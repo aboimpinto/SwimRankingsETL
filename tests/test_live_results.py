@@ -107,8 +107,11 @@ class Database(unittest.TestCase):
         day2=deepcopy(r)
         for row in day2['rows']: row['event']['date']='2026-09-27';row['event']['number']='2'
         self.assertEqual(self.apply(day2,days=['2026-09-27'])['counts'],{'insert':3})
+        with self.conn.cursor() as c:
+            c.execute('UPDATE results SET points_rudolph=19')
         r['rows'][0]['time_seconds']='74.00'
         self.assertEqual(self.apply(r)['counts']['update'],1)
+        self.assertIsNone(self.scalar('SELECT points_rudolph FROM results ORDER BY id LIMIT 1'))
         self.assertEqual(self.scalar('SELECT count(*) FROM results'),6)
         self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE result_date='2026-09-27'"),3)
 
