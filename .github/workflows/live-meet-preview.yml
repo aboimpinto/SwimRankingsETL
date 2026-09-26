@@ -1,0 +1,28 @@
+name: Live meet preview
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/preview_live_meet.py
+      - scripts/import_live_swimrankings_meet.py
+      - tests/test_live_meet_preview.py
+      - docs/live-meet-previews.md
+      - .github/workflows/live-meet-preview.yml
+  pull_request:
+    paths:
+      - scripts/preview_live_meet.py
+      - scripts/import_live_swimrankings_meet.py
+      - tests/test_live_meet_preview.py
+      - docs/live-meet-previews.md
+      - .github/workflows/live-meet-preview.yml
+permissions:
+  contents: read
+jobs:
+  database-free-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p test_live_meet_preview.py -v
