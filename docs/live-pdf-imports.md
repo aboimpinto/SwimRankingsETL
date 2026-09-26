@@ -48,7 +48,7 @@ python3 scripts/import_live_results.py collect \
   --live-id 10928 --output reports/live-imports
 python3 scripts/import_live_results.py plan \
   --source reports/live-imports/10928/source.json \
-  --config .secrets/localserver.json --expect-host 10.88.30.124 \
+  --config .secrets/localserver.json --expect-host <configured-host> \
   --expect-database swimrankings --output reports/live-imports/10928/plan.json
 ```
 
@@ -61,7 +61,7 @@ These raw reports contain swimmer data and must not be publicly served.
 ```bash
 python3 scripts/import_live_results.py apply \
   --source reports/live-imports/10928/source.json \
-  --config .secrets/localserver.json --expect-host 10.88.30.124 \
+  --config .secrets/localserver.json --expect-host <configured-host> \
   --expect-database swimrankings --expect-plan-sha <reviewed-plan-hash> \
   --output reports/live-imports/10928/receipt.json --commit
 ```
@@ -69,6 +69,11 @@ python3 scripts/import_live_results.py apply \
 Without `--commit`, `apply` only produces another read-only plan. Add `--day
 YYYY-MM-DD` to both planning and applying to select one or more session dates.
 Add `--identities path/to/reviewed-map.json` to both commands when needed.
+Retain that reviewed map and pass it on every later preview/apply for the meet,
+including LENEX enrichment. Verify canonical source keys when reusing an existing
+SwimProfiles review: integer swimmer IDs are database-local and must not be copied
+between localServer and AWS. The importer does not fetch the application review
+registry automatically.
 `--allow-held` explicitly applies only eligible rows while retaining identity or
 unsupported-document holds. It cannot bypass regressed exports or conflicting
 previously imported race identities. Review what will remain missing first.
