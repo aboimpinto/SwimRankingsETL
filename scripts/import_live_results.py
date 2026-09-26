@@ -125,6 +125,12 @@ def build_plan(conn, report, identities=None, days=None):
         swimmer = candidates[0] if candidates else None
         swimmer_key = swimmer['swimmer_id'] if swimmer else canonical_swimmer_id(row['nation'],row['gender'],row['birth_year'],row['first_name'],row['last_name'])
         key = race_key(row, swimmer_key)
+        if row['source_kind']=='lenex' and any(
+            prior['source_kind']=='pdf' and name_key(prior['source_payload'])==name_key(row)
+            and prior['event_number']==event['number'] and str(prior['event_date'])==event['date']
+            and prior['event_round']==event['round'] and prior['race_key']!=key for prior in ledger):
+            holds.append({'reason':'lenex_identity_needs_review','identity_key':identity_key(row)})
+            continue
         if key in seen:
             entries = [e for e in entries if e['race_key'] != key]
             holds.append({'reason':'ambiguous_source_race','race_key':key})

@@ -142,6 +142,15 @@ class Database(unittest.TestCase):
         self.assertTrue(any(h['reason']=='previously_imported_races_missing' for h in p['holds']))
         with self.assertRaises(ValueError): apply_plan(self.conn,r,p['plan_hash'],allow_held=True)
 
+    def test_lenex_nationality_change_cannot_duplicate_pdf_identity(self):
+        r=report();self.apply(r)
+        l=deepcopy(r)
+        for row in l['rows']: row.update(source_kind='lenex',nation='HUN')
+        p=build_plan(self.conn,l)
+        self.assertEqual(len(p['entries']),0)
+        self.assertTrue(all(h['reason']=='lenex_identity_needs_review' for h in p['holds']))
+        self.assertEqual(self.scalar('SELECT count(*) FROM results'),3)
+
     def test_invalid_time_is_rejected_in_read_only_plan(self):
         r=report();r['rows'][0]['time_seconds']='None'
         with self.assertRaises(ValueError): build_plan(self.conn,r)
