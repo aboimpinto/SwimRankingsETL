@@ -79,6 +79,7 @@ def fresh_download(live_id):
                 return data, response.url, failures
         except HTTPError as exc:
             failures.append(f'{url}: HTTP {exc.code}')
+            exc.close()
             if exc.code in (401, 403, 429):
                 raise ValueError('; '.join(failures)) from exc
         except URLError as exc:
@@ -203,12 +204,12 @@ def preview(output, live_id, start, end, *, data=None, source=None, today=None, 
                       'new_results_observed' if not baseline else 'changed_results_observed' if delta['added'] or delta['changed'] else 'unchanged',
                       import_readiness='hold' if hold or not after else 'candidate_for_import_review')
         # Empty/regressed/ambiguous downloads must never erase previously observed results.
-        if after and not hold:
-            atomic_json(baseline_path, {**snapshot, 'records': after})
         private_file = directory / f"{report['sha256']}.lxf"
         if not private_file.exists():
             private_file.write_bytes(data)
             private_file.chmod(0o600)
+        if after and not hold:
+            atomic_json(baseline_path, {**snapshot, 'records': after})
     except (ValueError, OSError, ET.ParseError, StopIteration, zipfile.BadZipFile) as exc:
         report.update(status='unavailable', import_readiness='hold', error=str(exc))
     report['note'] = ('Source RESULT counts are not canonical database row counts (relays can expand). '
@@ -238,6 +239,8 @@ def main():
     else:
         if not args.live_id or not args.start or not args.end:
             parser.error('--live-id, --start and --end are required')
+        if not args.live_id.isdigit() or args.start > args.end or (args.end - args.start).days > 60:
+            parser.error('Use a numeric live ID and a schedule of at most 61 days')
         reports = [preview(args.output, args.live_id, args.start, args.end,
                            data=args.lxf_file.read_bytes() if args.lxf_file else None,
                            source=str(args.lxf_file) if args.lxf_file else None)]
