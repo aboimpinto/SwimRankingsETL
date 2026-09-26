@@ -62,6 +62,8 @@ PostgreSQL cache; browser requests do not rebuild rankings.
 
 ## Operational documentation
 
+- [Live PDF imports and competition discovery](docs/live-pdf-imports.md): reviewed basic results, selected days, repeat imports and later LENEX enrichment.
+
 - [Multi-day live meet previews](docs/live-meet-previews.md): database-free dry runs, saved reports and fresh rechecks before importing partial meets.
 
 - [Desktop import, incremental delivery and all three website refreshes](docs/desktop-incremental-delivery.md): setup, export/push commands, private configuration, receipts, retries and recovery.
