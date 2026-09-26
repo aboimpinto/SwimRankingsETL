@@ -93,6 +93,11 @@ def publish(conn, config, commit=False, send=notify, rebuild=rebuild_summary):
                 raise ValueError("Another import/publication is running; retry")
             locked = True
             cur.execute(LEDGER + OUTBOX)
+            if commit:
+                # Even ADD COLUMN IF NOT EXISTS holds an AccessExclusiveLock.
+                # Release schema locks before the long rebuild; the session-level
+                # advisory lock still excludes concurrent delivery/publication.
+                conn.commit()
             pending = rows(
                 cur,
                 "SELECT publisher,meet_key,revision,sha256,affected_from FROM swimrankings_delivery.meets WHERE needs_summary_refresh ORDER BY publisher,meet_key",

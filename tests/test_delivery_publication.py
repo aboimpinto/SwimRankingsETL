@@ -87,6 +87,24 @@ class Publication(unittest.TestCase):
                 self.scalar("SELECT sha256 FROM swimrankings_delivery.meets"),
             )
 
+    def test_result_reads_remain_available_during_summary_rebuild(self):
+        self.seed()
+        def rebuilding(conn):
+            cfg=d.configuration(os.environ['DELIVERY_TEST_CONFIG'])
+            probe=d.connect(os.environ['DELIVERY_TEST_CONFIG'],cfg['host'],cfg['dbname'],readonly=True)
+            try:
+                with probe.cursor() as c:
+                    c.execute("SET LOCAL lock_timeout='500ms'")
+                    c.execute('SELECT count(*) FROM results')
+                    self.assertEqual(c.fetchone()[0],2)
+                    c.execute('SELECT pg_try_advisory_lock(784211990)')
+                    self.assertFalse(c.fetchone()[0])
+            finally:
+                probe.rollback();probe.close()
+            return {'read_check':'passed'}
+        result=pub.publish(self.conn,CONFIG,True,send=lambda c,n:None,rebuild=rebuilding)
+        self.assertEqual(result['status'],'complete')
+
     def test_summary_failure_keeps_pending_and_never_notifies(self):
         self.seed()
         send = Mock()

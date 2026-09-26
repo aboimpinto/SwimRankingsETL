@@ -4,6 +4,10 @@ on:
     branches: [main, feat/desktop-incremental-delivery]
   pull_request:
     paths:
+      - scripts/live_result_sources.py
+      - scripts/import_live_results.py
+      - tests/test_live_results.py
+      - docs/live-pdf-imports.md
       - README.md
       - MemoryBank/README.md
       - MemoryBank/projectbrief.md
@@ -63,3 +67,7 @@ jobs:
         env:
           DELIVERY_TEST_CONFIG: ${{ runner.temp }}/delivery-test.json
         run: python -m unittest discover -s tests -p 'test_*delivery*.py' -v
+      - name: Validate live PDF and LENEX imports in isolated schemas
+        env:
+          LIVE_IMPORT_TEST_CONFIG: ${{ runner.temp }}/delivery-test.json
+        run: python -m unittest discover -s tests -p test_live_results.py -v
