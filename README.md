@@ -62,6 +62,8 @@ PostgreSQL cache; browser requests do not rebuild rankings.
 
 ## Operational documentation
 
+- [Multi-day live meet previews](docs/live-meet-previews.md): database-free dry runs, saved reports and fresh rechecks before importing partial meets.
+
 - [Desktop import, incremental delivery and all three website refreshes](docs/desktop-incremental-delivery.md): setup, export/push commands, private configuration, receipts, retries and recovery.
 - [Importing data for SophiaWalker](docs/import-to-sophia-website-db.md): local import context; use the delivery runbook above for production distribution.
 - [Additive Sharks meet performances](docs/club-meet-performances.md): recover saved LENEX evidence and preserve the club performance log.
