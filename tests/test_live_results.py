@@ -148,7 +148,8 @@ class Database(unittest.TestCase):
         for row in l['rows']: row.update(source_kind='lenex',nation='HUN')
         p=build_plan(self.conn,l)
         self.assertEqual(len(p['entries']),0)
-        self.assertTrue(all(h['reason']=='lenex_identity_needs_review' for h in p['holds']))
+        self.assertEqual(sum(h['reason']=='lenex_identity_needs_review' for h in p['holds']),3)
+        self.assertTrue(any(h['reason']=='previously_imported_races_missing' for h in p['holds']))
         self.assertEqual(self.scalar('SELECT count(*) FROM results'),3)
 
     def test_invalid_time_is_rejected_in_read_only_plan(self):
