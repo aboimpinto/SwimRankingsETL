@@ -88,7 +88,8 @@ python3 scripts/import_live_results.py collect --recheck --output reports/live-i
 ```
 
 Then plan/apply changed meets again. Also discover new meets since the last
-successful collection period. Retain watches independently of the cutoff; late
+successful collection period. New importer runs are recorded in
+`live_result_import_runs`; the older `processing_log` only records legacy runs. Retain watches independently of the cutoff; late
 results may appear after a meet has ended. These are manual commands, not a cron
 job. All collected meets remain `recheck_required` until independently verified;
 calendar dates and one result per day do not prove completion.
@@ -114,6 +115,8 @@ Receipts describe the subset actually imported, not full provider coverage.
 No destructive database reset or bulk refresh of unrelated archives is needed.
 Before an operational batch, retain its plans and a database backup. Preserve
 source FINA points; any separate local score calculation needs its own receipt.
+A corrected finish time invalidates the previously calculated Rudolph score
+until that calculation is rerun; it must not display the old score for a new time.
 
 ## Tests
 
