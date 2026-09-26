@@ -225,7 +225,7 @@ def parse_pdf(text, meet, source, source_hash, schedule=None):
             status = None if item['rank'][0].isdigit() else 'DSQ' if item['rank'].lower() in ('disq.', 'dsq') else item['rank'].upper()
             rows.append(dict(event=event.copy(), first_name=first, last_name=last, birth_year=int(item['year']),
                              gender=event['gender'], nation=None, athlete_id=None, club=item['club'],
-                             time_seconds=str(time_to_seconds(item['time'])),
+                             time_seconds=str(Decimal(item['time']) if ':' not in item['time'] else time_to_seconds(item['time'])),
                              points_fina=int(item['points']) if item['points'] and 'Punkte: FINA' in text else None,
                              rank=None, age_group_rank=int(item['rank'][:-1]) if status is None else None,
                              age_group_label=age_label, status=status, heat=None, lane=None, reaction_time=None,

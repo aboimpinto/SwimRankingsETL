@@ -98,6 +98,11 @@ def build_plan(conn, report, identities=None, days=None):
     entries, holds, seen, current_events = [], list(report['holds']), set(), set()
     for row in report['rows']:
         event = row['event']
+        try:
+            timing=Decimal(row['time_seconds'])
+            if not timing.is_finite() or timing<=0: raise ValueError('Non-positive time')
+        except Exception as exc:
+            raise ValueError('Invalid normalized source time; regenerate source preview') from exc
         if days and event['date'] not in days:
             continue
         current_events.add((event['number'],event['date'],event['round']))

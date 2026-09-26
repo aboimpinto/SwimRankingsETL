@@ -53,6 +53,10 @@ class Sources(unittest.TestCase):
         self.assertIsNone(a['nation']);self.assertIsNone(a['reaction_time']);self.assertEqual(a['splits'],[])
         self.assertEqual(r['rows'][2]['status'],'DSQ')
 
+    def test_pdf_subminute_time(self):
+        parsed=parse_pdf(TEXT.replace('1:14.83','54.83'),MEET,'url','hash',html_schedule(HTML))
+        self.assertEqual(parsed['rows'][0]['time_seconds'],'54.83')
+
     def test_pdf_rejects_wrong_meet_date_round_or_layout(self):
         for text in [TEXT.replace('Synthetic Meeting','Wrong Meet'),TEXT.replace('26.09.2026','01.10.2026'),TEXT.replace('2014    1:14.83','??    1:14.83')]:
             self.assertTrue(parse_pdf(text,MEET,'url','hash',html_schedule(HTML))['holds'])
@@ -137,6 +141,11 @@ class Database(unittest.TestCase):
         p=build_plan(self.conn,r)
         self.assertTrue(any(h['reason']=='previously_imported_races_missing' for h in p['holds']))
         with self.assertRaises(ValueError): apply_plan(self.conn,r,p['plan_hash'],allow_held=True)
+
+    def test_invalid_time_is_rejected_in_read_only_plan(self):
+        r=report();r['rows'][0]['time_seconds']='None'
+        with self.assertRaises(ValueError): build_plan(self.conn,r)
+        self.assertEqual(self.scalar('SELECT count(*) FROM results'),0)
 
     def test_unknown_pdf_is_held_but_authoritative_lenex_can_add(self):
         r=report();r['rows'][0]['first_name']='New'
