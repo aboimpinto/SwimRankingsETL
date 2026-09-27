@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from live_result_sources import discover, collect, normalized
+from live_result_sources import discover, collect, normalized, NO_TIME_STATUSES
 from preview_live_meet import atomic_json
 from import_live_swimrankings_meet import ensure_country, ensure_meet, ensure_event, canonical_swimmer_id
 
@@ -100,7 +100,9 @@ def build_plan(conn, report, identities=None, days=None):
         event = row['event']
         try:
             timing=Decimal(row['time_seconds'])
-            if not timing.is_finite() or timing<=0: raise ValueError('Non-positive time')
+            no_time = row.get('source_kind') == 'lenex' and row.get('status') in NO_TIME_STATUSES
+            if not timing.is_finite() or timing < 0 or (timing == 0 and not no_time):
+                raise ValueError('Invalid finish time or unsupported no-time status')
         except Exception as exc:
             raise ValueError('Invalid normalized source time; regenerate source preview') from exc
         if days and event['date'] not in days:
@@ -220,7 +222,8 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                           is_relay=event['is_relay'],relay_count=event['relay_count'],
                           club_name=row['club'] if row['source_kind']=='lenex' else None,
                           club_source=row['source_hash'] if row['source_kind']=='lenex' else None)
-            if entry['before'] and Decimal(str(entry['before']['time_seconds'])) != Decimal(row['time_seconds']):
+            if entry['before'] and (Decimal(str(entry['before']['time_seconds'])) != Decimal(row['time_seconds'])
+                                    or entry['before']['status'] != row['status']):
                 # A previously calculated score must not survive a corrected time.
                 values['points_rudolph'] = None
             if row['source_kind']=='lenex':

@@ -75,6 +75,23 @@ class Sources(unittest.TestCase):
         self.assertEqual(r['rows'][0]['splits'],[{'distance':50,'time_seconds':'35.50'}])
 
 
+    def test_lenex_explicit_no_time_statuses_preserved(self):
+        xml=b'''<LENEX><MEETS><MEET name="Synthetic Meeting" city="Meilen" nation="SUI" course="SCM">
+<SESSIONS><SESSION date="2026-09-27"><EVENTS><EVENT eventid="e" number="1" gender="F" round="TIM"><SWIMSTYLE distance="100" stroke="BREAST"/></EVENT></EVENTS></SESSION></SESSIONS>
+<CLUBS><CLUB name="Example Club"><ATHLETES><ATHLETE athleteid="a" firstname="Alice" lastname="EXAMPLE" birthdate="2014-01-01" gender="F" nation="SUI">
+<RESULTS><RESULT eventid="e" resultid="r" swimtime="00:00:00.00" status="DNS"/></RESULTS>
+</ATHLETE></ATHLETES></CLUB></CLUBS></MEET></MEETS></LENEX>'''
+        for status in ('DNS','DNF','DSQ','WDR','SICK','RJC','OTL'):
+            r=parse_lenex(xml.replace(b'DNS',status.encode()),MEET,'fixture')
+            self.assertEqual(r['rows'][0]['status'],status)
+            self.assertEqual(r['rows'][0]['time_seconds'],'0.00')
+            self.assertEqual(r['rows'][0]['splits'],[])
+        for change in (xml.replace(b' status="DNS"',b''),xml.replace(b'DNS',b'UNKNOWN'),
+                       xml.replace(b' swimtime="00:00:00.00"',b'')):
+            r=parse_lenex(change,MEET,'fixture')
+            self.assertEqual(r['rows'],[]);self.assertTrue(r['excluded'])
+
+
 @unittest.skipUnless(os.getenv('LIVE_IMPORT_TEST_CONFIG'),'Set LIVE_IMPORT_TEST_CONFIG for isolated transactional schema tests')
 class Database(unittest.TestCase):
     def setUp(self):
@@ -127,6 +144,29 @@ class Database(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT count(*) FROM splits'),3)
         self.assertEqual(self.apply(r)['counts'],{'protected':3})
         self.assertEqual(self.scalar('SELECT reaction_time FROM results ORDER BY id LIMIT 1'),'+0.71')
+
+    def test_status_correction_retains_id_and_excludes_zero_from_valid_swims(self):
+        r=report();self.apply(r)
+        original=self.scalar('SELECT min(id) FROM results')
+        with self.conn.cursor() as c: c.execute('UPDATE results SET points_rudolph=19')
+        l=deepcopy(r)
+        for row in l['rows']:
+            row.update(source_kind='lenex',nation='SUI',athlete_id='source-'+row['first_name'])
+        l['rows'][0].update(status='DNF',time_seconds='0.00',reaction_time='+0.71',
+                            splits=[{'distance':50,'time_seconds':'35.5'}])
+        l['rows'][1].update(status='DSQ')  # Same time, changed status also clears computed score.
+        self.assertEqual(self.apply(l)['counts'],{'update':3})
+        self.assertEqual(self.scalar('SELECT min(id) FROM results'),original)
+        self.assertEqual(self.scalar('SELECT count(*) FROM results'),3)
+        self.assertEqual(self.scalar('SELECT status FROM results ORDER BY id LIMIT 1'),'DNF')
+        self.assertEqual(self.scalar('SELECT count(*) FROM splits'),1)
+        self.assertEqual(self.scalar('SELECT count(*) FROM results WHERE points_rudolph IS NOT NULL'),1)
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE time_seconds>0 AND coalesce(status,'')=''"),0)
+        self.assertEqual(self.apply(l)['counts'],{'unchanged':3})
+        self.assertEqual(self.apply(r)['counts'],{'protected':3})
+        for source_kind,status in [('pdf','DNS'),('lenex',None),('lenex','UNKNOWN')]:
+            invalid=deepcopy(l);invalid['rows'][0].update(source_kind=source_kind,status=status)
+            with self.assertRaises(ValueError): build_plan(self.conn,invalid)
 
     def test_ambiguous_pdf_identity_requires_explicit_review(self):
         with self.conn.cursor() as c:
