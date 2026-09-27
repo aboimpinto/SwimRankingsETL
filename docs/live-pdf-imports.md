@@ -18,7 +18,7 @@ table also supplies explicit round, distance, stroke and competition category.
 The initial PDF adapter supports the verified **German Splash individual-result
 layout**, including category placements, four-digit birth years, recorded DSQ
 times, FINA points and club codes. Relays without verified athlete identities,
-non-finishes without a recorded time, and unsupported layouts are reported
+PDF non-finishes without a recorded time, and unsupported layouts are reported
 explicitly. PDF swimmer nationality, reaction time, heat, lane and splits remain
 unknown. Club country is never substituted for nationality. PDF club codes stay
 in the source receipt and do not replace an established full club name.
@@ -140,3 +140,13 @@ LIVE_IMPORT_TEST_CONFIG=/private/connection.json \
 Database tests create random `live_import_test_*` schemas inside a transaction and
 roll everything back. They never truncate shared tables, commit fixtures or
 create PostgreSQL containers. CI uses the existing delivery test service.
+
+## Explicit LENEX non-finishes
+
+The existing canonical schema uses the source's `00:00:00.00` sentinel plus an
+explicit DNS, DNF, DSQ, WDR, SICK, RJC or OTL status. The live importer preserves
+those records, including any supplied partial splits or reaction time. Zero is
+not a measured finish time and must never enter best-time/ranking populations.
+Missing time attributes, unstated statuses and unsupported statuses with zero
+remain excluded; no time is invented. Positive recorded DSQ times are retained.
+A status correction also clears any previously calculated Rudolph score.

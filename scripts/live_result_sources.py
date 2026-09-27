@@ -22,6 +22,8 @@ from import_live_swimrankings_meet import (
 from preview_live_meet import inspect_lenex, fresh_download, atomic_json
 
 INDEX = 'https://live.swimrankings.net/'
+# Canonical schema stores the explicit LENEX zero sentinel with its non-finish status.
+NO_TIME_STATUSES = frozenset({'DNS', 'DNF', 'DSQ', 'WDR', 'SICK', 'RJC', 'OTL'})
 
 
 def normalized(value):
@@ -272,8 +274,9 @@ def parse_lenex(data, meet, source):
             athletes[a.get('athleteid')] = (a, club.get('name'))
     def add_result(a, club_name, result, event):
         time = time_to_seconds(result.get('swimtime'))
-        if not time or time <= 0:
-            excluded.append('Non-finish without a positive time')
+        status = (result.get('status') or '').strip().upper() or None
+        if time is None or time < 0 or (time == 0 and status not in NO_TIME_STATUSES):
+            excluded.append('Missing/invalid finish time without a supported explicit no-time status')
             return
         year = parse_int((a.get('birthdate') or '')[:4])
         if not year or not a.get('firstname') or not a.get('lastname') or not a.get('nation'):
@@ -293,7 +296,7 @@ def parse_lenex(data, meet, source):
             age_group_max=group.age_group_max if group else None, age_group_order=group.age_group_order if group else None,
             qualification=result.get('qualify') or result.get('qualification'),
             entry_time_seconds=str(time_to_seconds(result.get('entrytime'))) if time_to_seconds(result.get('entrytime')) is not None else None,
-            comment=result.get('comment') or result.get('remark'), status=result.get('status'),
+            comment=result.get('comment') or result.get('remark'), status=status,
             heat=parse_int(result.get('heatid')), lane=parse_int(result.get('lane')), reaction_time=result.get('reactiontime'),
             splits=[{'distance':int(s.get('distance')), 'time_seconds':str(time_to_seconds(s.get('swimtime')))}
                     for s in result.findall('./SPLITS/SPLIT') if time_to_seconds(s.get('swimtime')) is not None],
