@@ -150,3 +150,11 @@ not a measured finish time and must never enter best-time/ranking populations.
 Missing time attributes, unstated statuses and unsupported statuses with zero
 remain excluded; no time is invented. Positive recorded DSQ times are retained.
 A status correction also clears any previously calculated Rudolph score.
+
+## Identity and affiliation policy
+
+See [swimmer identity and club history](swimmer-identity-and-club-history.md).
+Capitalization and club changes are not separate-person evidence. Result
+attribution and combining historical profiles are separate decisions. The
+September reconciliation uses checked mappings and the existing reversible
+application review mechanism; it does not auto-merge the entire candidate queue.
