@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly AWS official swimming record refresh
+
+[Timer]
+OnCalendar=Mon *-*-* 05:30:00 Europe/Zurich
+RandomizedDelaySec=15m
+Persistent=true
+Unit=swimrankings-records-aws.service
+
+[Install]
+WantedBy=timers.target

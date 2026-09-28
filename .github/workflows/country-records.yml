@@ -29,4 +29,4 @@ jobs:
       - run: python -m unittest discover -s tests -p test_country_records.py -v
         env:
           RECORD_TEST_DSN: postgresql://records_test:records_test@localhost:5432/records_test
-      - run: bash -n ops/refresh-records.sh
+      - run: for script in ops/*records*.sh; do bash -n "$script"; done
