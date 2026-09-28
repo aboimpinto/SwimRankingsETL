@@ -88,6 +88,8 @@ class SwimRankingsRecord:
     region: Optional[str] = None
     handicap: Optional[str] = None
     record_status: Optional[str] = None
+    comparison_scope: Optional[str] = None
+    scope_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -232,6 +234,34 @@ def iter_recordlists(root: ET.Element) -> Iterable[ET.Element]:
     return recordlists.findall("RECORDLIST")
 
 
+def classify_recordlist(node):
+    """Conservative benchmark classification; retain other source lists for audit.
+
+    LENEX permits federation-defined types. Never treat every country-prefixed
+    type as a national record (SUI.RZW, for example, is regional).
+    """
+    name = (node.get("name") or "").casefold()
+    if node.get("region") or node.get("handicap") or node.get("clubid"):
+        return "excluded", "regional, para or club restriction"
+    if any(word in name for word in ("until ", "archiv", "former ")):
+        return "excluded", "historical record list"
+    if any(word in name for word in ("championship", "olympic", "games", "world cup", "regio", "provincial", "para record")):
+        return "excluded", "competition, regional or para record list"
+    kind = (node.get("type") or "").upper()
+    nation = (node.get("nation") or "").upper()
+    group = node.find("AGEGROUP")
+    ages = [parse_int(group.get(key)) if group is not None else None for key in ("agemin", "agemax")]
+    bounded = any(value is not None and value > 0 for value in ages)
+    if kind in ("WR", "ER") and not bounded:
+        return ("world" if kind == "WR" else "europe"), "LENEX continental/world record type"
+    # FAR is the published Faroese list's type; FRO is its LENEX nation.
+    national = bool(nation) and (kind == nation or (nation == "FRO" and kind == "FAR"))
+    age_type = bool(nation) and kind in (nation + ".JR", nation + ".MS")
+    if national or (age_type and bounded):
+        return ("age" if bounded else "national"), "verified LENEX national/age record type"
+    return "unmapped", "record type requires scope review before comparison"
+
+
 def parse_records(
     root: ET.Element,
     source_url: str,
@@ -319,6 +349,8 @@ def parse_records(
                     region=clean_text(recordlist.get("region")),
                     handicap=clean_text(recordlist.get("handicap")),
                     record_status=clean_text(record.get("status")),
+                    comparison_scope=classify_recordlist(recordlist)[0],
+                    scope_reason=classify_recordlist(recordlist)[1],
                 )
             )
     return records
@@ -377,7 +409,7 @@ def ensure_schema(cur) -> None:
         ADD COLUMN IF NOT EXISTS source_order INTEGER NOT NULL DEFAULT 0
         """
     )
-    cur.execute("ALTER TABLE swimrankings_records ADD COLUMN IF NOT EXISTS region text, ADD COLUMN IF NOT EXISTS handicap text, ADD COLUMN IF NOT EXISTS record_status text")
+    cur.execute("ALTER TABLE swimrankings_records ADD COLUMN IF NOT EXISTS region text, ADD COLUMN IF NOT EXISTS handicap text, ADD COLUMN IF NOT EXISTS record_status text, ADD COLUMN IF NOT EXISTS comparison_scope text, ADD COLUMN IF NOT EXISTS scope_reason text")
     cur.execute("DROP INDEX IF EXISTS swimrankings_records_key")
     cur.execute(
         """
@@ -520,7 +552,7 @@ def insert_record(cur, record: SwimRankingsRecord) -> int:
         ),
     )
     record_id = int(cur.fetchone()[0])
-    cur.execute("UPDATE swimrankings_records SET region=%s,handicap=%s,record_status=%s WHERE id=%s",(record.region,record.handicap,record.record_status,record_id))
+    cur.execute("UPDATE swimrankings_records SET region=%s,handicap=%s,record_status=%s,comparison_scope=%s,scope_reason=%s WHERE id=%s",(record.region,record.handicap,record.record_status,record.comparison_scope,record.scope_reason,record_id))
     return record_id
 
 

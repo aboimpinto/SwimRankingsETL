@@ -38,8 +38,34 @@ class Parse(unittest.TestCase):
         self.assertEqual(h,r.parse_snapshot(xml(age='<AGEGROUP agemin="12" agemax="12"/>'),'51000','LCM','https://www.swimrankings.net/test')[1])
         for data in (xml(extra='region="CAT"'),b'<LENEX/>',xml()):
             with self.assertRaises(ValueError):r.parse_snapshot(data,'51000','SCM','url')
-        with self.assertRaises(ValueError):
-            r.parse_snapshot(xml().replace(b'type="ESP"', b'type="ESP.REGION"'),'51000','LCM','url')
+        records,_=r.parse_snapshot(xml().replace(b'type="ESP"', b'type="ESP.REGION"'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'unmapped')
+        records,_=r.parse_snapshot(xml(extra='region="CAT"'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'excluded')
+    def test_masters_alias_and_archived_scope(self):
+        data=xml(nation='SUI',age='<AGEGROUP agemin="60" agemax="64"/>').replace(b'type="SUI"',b'type="SUI.MS"')
+        records,_=r.parse_snapshot(data,'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'age')
+        self.assertEqual(r.snapshot_inventory(records)[0]['age_max'],64)
+        records,_=r.parse_snapshot(xml(nation='FRO').replace(b'type="FRO"',b'type="FAR"'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'national')
+        records,_=r.parse_snapshot(xml().replace(b'National records',b'National records (until July 2024)'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'excluded')
+    def test_failed_catalogue_retries_persisted_inventory(self):
+        client=Mock()
+        def download(url):
+            if 'RecordLenex' not in url: raise ValueError('Catalogue unavailable')
+            return DownloadedFile(xml(),'url','text/xml')
+        client.download.side_effect=download
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)/'catalogue.json'
+            r.write_report(state,{'inventory':{'51000':{'id':'51000','labels':['Spanish records'],'links':[]}},'checked_at':'earlier'})
+            report=r.refresh(None,client,dry_run=True,save_dir=Path(folder),inventory_path=state,delay=0)
+            self.assertEqual(report['requested_lists'],['51000'])
+            self.assertEqual(report['catalogue'],'failed')
+            self.assertFalse(report['complete_published_catalogue'])
+            self.assertEqual(report['countries_with_comparisons'],['ESP'])
+            self.assertEqual(report['files'][0]['definitions'][0]['name'],'National records')
     def test_dry_run_does_not_connect_or_publish(self):
         client=Mock();client.download.return_value=DownloadedFile(xml(),'url','text/xml')
         with tempfile.TemporaryDirectory() as folder:

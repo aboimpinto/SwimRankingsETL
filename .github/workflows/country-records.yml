@@ -2,9 +2,9 @@ name: Country records
 on:
   push:
     branches: [main]
-    paths: ['scripts/*records*', 'scripts/import_Swiss_NationalRecords.py', 'scripts/swimrankings_http.py', 'tests/test_country_records.py', 'tests/test_swimrankings_http.py', 'ops/*records*', '.github/workflows/country-records.yml']
+    paths: ['scripts/*records*', 'scripts/import_Swiss_NationalRecords.py', 'scripts/swimrankings_http.py', 'tests/test_country_records.py', 'tests/test_record_pipeline.py', 'tests/test_swimrankings_http.py', 'ops/*records*', '.github/workflows/country-records.yml']
   pull_request:
-    paths: ['scripts/*records*', 'scripts/import_Swiss_NationalRecords.py', 'scripts/swimrankings_http.py', 'tests/test_country_records.py', 'tests/test_swimrankings_http.py', 'ops/*records*', '.github/workflows/country-records.yml']
+    paths: ['scripts/*records*', 'scripts/import_Swiss_NationalRecords.py', 'scripts/swimrankings_http.py', 'tests/test_country_records.py', 'tests/test_record_pipeline.py', 'tests/test_swimrankings_http.py', 'ops/*records*', '.github/workflows/country-records.yml']
 permissions:
   contents: read
 jobs:
@@ -29,4 +29,5 @@ jobs:
       - run: python -m unittest discover -s tests -p test_country_records.py -v
         env:
           RECORD_TEST_DSN: postgresql://records_test:records_test@localhost:5432/records_test
+      - run: python -m unittest discover -s tests -p test_record_pipeline.py -v
       - run: for script in ops/*records*.sh; do bash -n "$script"; done

@@ -1,61 +1,153 @@
-# Official country records: discovery, refresh and delivery
+# Published country record refresh
 
-National **rankings** list performances; official **record lists** define record holders and age bounds. The homepage's National Rankings country links can lead to a country's record catalogue. The refresher follows only those published navigation links (two levels, at most 100 pages), extracts record-list IDs, and downloads the LENEX lists. It does not turn the fastest ranking row into an official record or invent country list IDs.
+The **Records catalogue** is distinct from the National Rankings country menu.
+Not every country with rankings has a published official record list. Import
+published record lists; do not infer official records from ranking results.
+The catalogue also contains Masters, regional, club, championship, para and
+archived lists. Preserve their provenance and exact age bounds, and keep their
+comparison scope separate.
 
-`refresh_country_records.py` reuses `swimrankings_http.py` and the established `import_Swiss_NationalRecords.py` parser/downloader. Known DB list IDs remain refreshable when catalogue HTML fails. Each list/course is validated and replaced atomically; identical semantic content retains record IDs. Empty, malformed or mismatched responses leave the previous snapshot intact. Regional, club and disability-specific lists are excluded from these general comparisons. Source nationality, supplied age bounds, status, provenance and measured splits are retained. No-time records are not published as performance benchmarks.
+## Manual process, ready for a later crontab
 
-## Run and verify
+No cron entry or timer is installed by these scripts. The owner will configure
+scheduling later. Both previously enabled local/AWS record timers were disabled
+on 28 September 2026.
+
+Create a private Bash environment file with absolute paths (quote paths that
+contain spaces):
 
 ```bash
-python3 scripts/refresh_country_records.py --dry-run \
-  --save-dir data/records --report reports/records-preview.json
-# Optional --record-list-id 50017 (repeatable), --catalogue-url <published-page>,
-# or --catalogue-html <saved-catalogue.html> for links from a normal browser session.
-python3 scripts/refresh_country_records.py --config .secrets/localserver.json \
-  --save-dir data/records --report reports/records-refresh.json
-```
-
-The private JSON uses psycopg2 connection keys (`host`, `port`, `dbname`, `user`, `password`). Never commit it. `--dry-run` does not mutate database tables, even when a connection is supplied. Downloaded source files and reports are local artifacts. A session lock prevents overlapping refreshes. Requests are paced and downloads stop on access/quota failures. Catalogue failure does not stop the separate known-list RecordLenex service; the run still exits nonzero and records incomplete discovery.
-
-Inspect `swimrankings_record_refresh` for list/course success, check time, last success, content hash and errors. A corrected list replaces its previous rows, including records removed by the provider. Failed refreshes retain the last successful hash and counts. The catalogue has its own status row; successful known-list downloads do not imply successful discovery of every country.
-
-After source refresh, SwimProfiles runs `pnpm import:records` and `pnpm audit:records`. It uses a SELECT-only source role and writes app-owned tables in a transaction. The normal swimmer import also includes these records. Unknown/missing country coverage is explicit; no Swiss fallback. Both scripts require the race-analysis release and migration `004-records.sql`.
-
-## Weekly refresh
-
-`ops/refresh-records.sh` runs source refresh, app publication and coverage reporting. It publishes freshness metadata after partial failures, then returns failure for monitoring. Run it after normal meet imports too. The user timer template runs Monday at 05:00 Europe/Zurich (up to 15 minutes jitter), with missed runs caught up when the machine starts.
-
-Create `~/.config/swimrankings-records/environment` privately with absolute installation paths:
-
-```text
 ETL_ROOT=/path/to/SwimRankingsETL
 RECORD_DB_CONFIG=/private/localserver.json
 RECORD_STATE_DIR=/path/to/record-refresh-state
-SWIMPROFILES_ROOT=/path/to/SwimProfiles
 RECORD_PYTHON=/path/to/python3
+SWIMPROFILES_ROOT=/path/to/SwimProfiles
 RECORD_PNPM=/path/to/pnpm
 ```
 
-Copy `ops/swimrankings-records.{service,timer}` to `~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then `systemctl --user enable --now swimrankings-records.timer`. Check `systemctl --user list-timers` and `journalctl --user -u swimrankings-records.service`. Do not enable against an old consumer release. A template is not evidence of an installed timer.
-
-## AWS delivery
-
-Meet-delivery packages do **not** transport official record tables. Copy a validated record-file bundle through the existing SSH delivery channel, then run the same script against AWS's private source writer config:
+The database JSON contains psycopg2 connection keys (`host`, `port`, `dbname`,
+`user`, `password`). Keep both configuration files outside Git. This is a trusted
+shell configuration, not a file received from SwimRankings.
 
 ```bash
-python3 scripts/refresh_country_records.py --config /private/aws-writer.json \
-  --input-directory /path/to/validated-record-bundle \
-  --save-dir /path/to/records --report /path/to/records-refresh.json
+# Inspect discovery/downloads and validate all available files, without DB writes
+# or application publication. Files and reports are written as evidence.
+bash ops/refresh-records.sh --env /private/environment --dry-run
+
+# Refresh source records, publish to the application, audit coverage.
+bash ops/refresh-records.sh --env /private/environment
 ```
 
-Offline mode imports only list IDs present in the bundle and never accesses the network. It reports `provided_files_only`, not freshly discovered catalogue coverage. Keep failed/stale download files out of a delivery bundle: select the successful `files` entries from the download report. Back up the two existing record tables before the first rollout. Grant the consumer source reader SELECT on records, splits and refresh metadata; apply the new app migration and run the records-only consumer import using maintenance credentials. Verify source and app counts and a zero-change replay. Do not reset shared databases or run a full profile import merely to update records.
+This exact command can later be used by cron with absolute paths. It requires no
+interactive prompt or browser. Do not enable it on a machine without configured
+credentials, dependencies and application maintenance code.
 
-## Verified coverage / remaining discovery
+Each invocation has a private `RECORD_STATE_DIR/runs/<UTC-time>-<unique>/` folder:
 
-On 28 September 2026 the established downloader fetched all 12 known list/course files: World 50001, World Junior 50008, Europe 50009, European Junior 50010, Switzerland 50017 and Swiss age groups 50018. These contain **1,142 records and 6,020 split rows**, imported into the local and AWS canonical sources. Only Swiss national/age lists are currently confirmed; this is not worldwide national coverage. The main site's HTML catalogue still returned HTTP 403, consistent with the ETL's previous access reports. Automated navigation is covered by fixtures, not yet a successful live country-directory crawl. A browser-accessible country's page/list URL or restored catalogue access is needed to validate broader discovery. File downloads themselves are working.
+- `run.log`: source/consumer output, including failed runs.
+- `source.json`: requested list IDs, catalogue status, file hashes, counts and
+  each imported definition's nation, gender, age bounds, type and scope.
+- `files/`: only validated files downloaded in this run; no previous-run files.
+- `coverage.json`: the local application's coverage audit, when using the local
+  SwimProfiles consumer.
+- `pipeline.json`: source, consumer and audit exit codes. `latest.json` is an
+  atomically replaced pointer receipt containing the run path.
 
-## Direct weekly AWS refresh
+A pipeline lock rejects overlap. The source also holds a PostgreSQL advisory
+lock. Requests use the existing `SwimRankingsHttpClient`, with bounded retries,
+request pacing and a stop on authorization/rate-limit failures. Run the process
+after meet imports too if updated benchmarks are needed.
 
-The public RecordLenex service can also refresh known lists directly on AWS through the same HTTP client (no browser cookies are copied). `ops/refresh-records-aws.sh` runs source refresh and the records-only SwimProfiles maintenance script. Configure `ETL_ROOT`, `RECORD_DB_CONFIG`, `RECORD_STATE_DIR`, `RECORD_PYTHON`, and `RECORD_CONSUMER_SCRIPT` in `/etc/swimrankings-records/environment`. Install the `swimrankings-records-aws.service` and timer under `/etc/systemd/system`. The timer runs Monday 05:30 Europe/Zurich plus up to 15 minutes jitter. Shared operation locks prevent collision with website deployment/import. Downloads or catalogue discovery failures retain prior data and make the service fail visibly, while successful lists and their health are published.
+Every run downloads each known list again, even when an earlier copy exists.
+Identical semantic content keeps row IDs; corrections replace a list/course in
+one transaction. Empty, malformed, mismatched or failed downloads preserve the
+last good snapshot. Successful lists and refresh health are still published
+after partial failure, but the command returns nonzero. There is no all-country
+success claim merely because the known files downloaded.
 
-For first rollout before the UI image, the consumer supports `SWIMPROFILES_RECORD_CODE_DIR`, a pinned copy of the tested maintenance scripts/library. After the normal release contains these scripts, omit the override. This does not replace the website image. Check the installed timer and a real run before claiming automation is active.
+## Discovery and coverage
+
+The default discovery URL is
+<https://www.swimrankings.net/index.php?page=recordSelect>. Only published
+SwimRankings navigation links are followed, within bounded depth/page limits.
+No guessed numeric list-ID sweep is used. `catalogue.json` persists discovered
+IDs and labels for future retries when catalogue access fails. Existing database
+list IDs are refreshed as well.
+
+If the catalogue requires a normal browser challenge, save its HTML from that
+browser and run:
+
+```bash
+bash ops/refresh-records.sh --env /private/environment --dry-run \
+  --catalogue-html /path/to/saved-record-catalogue.html
+```
+
+Repeat without `--dry-run` to import. Saved HTML is explicitly reported as
+`saved_html`, with its hash; it is not proof of a fresh online catalogue crawl.
+Screenshots supply names but do not contain the linked IDs needed for downloads.
+An old saved catalogue allows known-list refresh but cannot reveal new lists
+added since it was saved. Normal weekly runs attempt fresh discovery again.
+
+`complete_published_catalogue` means live catalogue discovery and every requested
+file succeeded, **not** that every country in the world publishes records.
+`unmapped_definitions` identifies source types requiring scope review. Missing
+source lists, missing age groups and unavailable countries must remain visible in
+the app audit; do not substitute another country's records.
+
+`comparison_scope` is conservative. World/European and verified national/age
+record types can become benchmarks; explicit regional/club/para restrictions,
+championship lists and archived lists are excluded. Swiss Masters (`SUI.MS`) and
+the published Faroese alias (`FAR`, nation `FRO`) are recognized. Unknown federation
+extensions are retained as `unmapped`, not treated as national merely because
+they start with a country code. Preserve source age bounds instead of imposing a
+universal youth/Masters category. SwimProfiles must consume the scope metadata
+before broader lists are enabled in comparisons.
+
+## AWS and application publication
+
+The same process works on AWS. Set `RECORD_CONSUMER_SCRIPT` to the existing
+records-only maintenance script instead of `SWIMPROFILES_ROOT`. The compatibility
+entry point `ops/refresh-records-aws.sh` invokes the same implementation. It does
+not install anything in crontab or systemd.
+
+For delivery of exactly the validated desktop files, copy one run's `files/`
+folder and source report through the established SSH channel, then use:
+
+```bash
+bash ops/refresh-records-aws.sh --env /private/aws-environment \
+  --input-directory /path/to/validated-run/files
+```
+
+Offline mode never discovers fresh lists; it reports `provided_files_only`.
+Only copy files from a successful/current run, not a cache mixing old and new
+files. Compare report hashes and record/split totals between source and target.
+An offline replay should report `changed: false` for all unchanged files.
+
+Apply source additive columns and the app record migration before publication;
+grant the app source reader SELECT on records, splits and refresh metadata.
+`pnpm import:records` publishes only record tables, using the app writer role;
+`pnpm audit:records` checks coverage for active profile countries. Do not run a
+full swimmer/ranking rebuild solely to refresh records. Shared DBs must never be
+reset. The web application reads only its own tables.
+
+## Verified coverage and open work — 28 September 2026
+
+Before this follow-up, both canonical and app databases contained **1,142 records
+and 6,020 splits** from 12 files: World 50001, World Junior 50008, European 50009,
+European Junior 50010, Swiss National 50017 and Swiss Age-group 50018, both courses.
+That was partial coverage, not completion of all-country discovery.
+
+Additional LENEX downloads have been verified against links published by the
+[KNZB](https://www.knzb.nl/wedstrijdzwemmen/records-ranglijsten-klassementen)
+(Netherlands 50030/50031 and archived 50032),
+[the Faroese federation](https://ssf.fo/kapping/met/foroysk-met-25m/) (50057), and
+[Swiss Aquatics](https://www.swiss-aquatics.ch/masters-schweizerrekorde-masters-kurzbahnschweizerrekorde/)
+(Masters 50069). Download verification alone is not a database import receipt.
+
+The main catalogue currently returns a Cloudflare browser challenge (403) to the
+ETL, while RecordLenex downloads work. The owner's screenshots confirm more lists
+exist, including countries not yet configured. The complete saved HTML or a
+successful live catalogue crawl is still needed to enumerate all published IDs.
+Keep [issue #29](https://github.com/aboimpinto/SwimRankingsETL/issues/29) and PR #30
+open until that coverage is actually verified. Website release state is separate
+from source-data refresh state.

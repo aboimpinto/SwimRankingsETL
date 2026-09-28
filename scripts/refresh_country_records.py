@@ -3,6 +3,7 @@
 from __future__ import annotations
 import argparse
 from dataclasses import asdict
+from datetime import datetime, timezone
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -20,7 +21,7 @@ from swimrankings_http import (
     validate_lenex_payload, DownloadedFile,
 )
 
-CATALOGUE = 'https://www.swimrankings.net/'
+CATALOGUE = 'https://www.swimrankings.net/index.php?page=recordSelect'
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS swimrankings_record_refresh (
  record_list_id text NOT NULL, course text NOT NULL,
@@ -33,16 +34,17 @@ CREATE TABLE IF NOT EXISTS swimrankings_record_refresh (
 
 class CatalogueParser(HTMLParser):
     def __init__(self):
-        super().__init__(); self.ids = set(); self.pages = set(); self.anchor = None; self.label = []
+        super().__init__(); self.ids = set(); self.pages = set(); self.anchor = None; self.label = []; self.entries = {}; self.anchor_ids = []
     def handle_starttag(self, tag, attrs):
         if tag != 'a': return
         href = dict(attrs).get('href', '')
         url = urlparse(href)
         if url.netloc and url.netloc not in ('www.swimrankings.net','swimrankings.net'): return
-        self.anchor = href; self.label = []
+        self.anchor = href; self.label = []; self.anchor_ids = []
         for key, values in parse_qs(url.query).items():
             if key.lower() == 'recordlistid':
-                self.ids.update(value for value in values if value.isdigit())
+                self.anchor_ids.extend(value for value in values if value.isdigit())
+                self.ids.update(self.anchor_ids)
 
 
     def handle_data(self, text):
@@ -53,6 +55,10 @@ class CatalogueParser(HTMLParser):
         query = parse_qs(urlparse(self.anchor).query)
         page = query.get('page', [''])[0].lower()
         label = ''.join(self.label).strip()
+        for list_id in self.anchor_ids:
+            entry = self.entries.setdefault(list_id, {'id': list_id, 'labels': [], 'links': []})
+            if label and label not in entry['labels']: entry['labels'].append(label)
+            if self.anchor not in entry['links']: entry['links'].append(self.anchor)
         # Follow only published country navigation / record catalogue links.
         # Never crawl athlete pages or scrape individual ranking results.
         if page in ('recordselect', 'recorddetail') or (
@@ -62,7 +68,7 @@ class CatalogueParser(HTMLParser):
         self.anchor = None
 
 
-def discover_catalogue(client, url=CATALOGUE, delay=1):
+def discover_catalogue(client, url=CATALOGUE, delay=1, inventory=None):
     pending = [(url, 0)]
     visited, ids, errors = set(), set(), []
     while pending:
@@ -77,6 +83,7 @@ def discover_catalogue(client, url=CATALOGUE, delay=1):
             parser = CatalogueParser()
             parser.feed(downloaded.data.decode('utf-8', errors='replace'))
             ids.update(parser.ids)
+            if inventory is not None: inventory.update(parser.entries)
             if depth < 2:
                 for href in sorted(parser.pages):
                     linked = urljoin(page_url, href)
@@ -99,14 +106,6 @@ def discover_lists(html):
 def parse_snapshot(data, list_id, course, url):
     root = load_root_from_lxf_bytes(data)
     if root.tag != 'LENEX': raise ValueError('Not a LENEX document')
-    # These lists are not national open/youth records; do not silently remove their scope.
-    for node in root.findall('.//RECORDLIST'):
-        if node.get('region') or node.get('handicap') or node.get('clubid'):
-            raise ValueError('Regional, club or disability-specific record list is not supported')
-        nation = node.get('nation', '').upper()
-        record_type = node.get('type', '')
-        if nation and record_type.startswith(nation + '.') and record_type != nation + '.JR':
-            raise ValueError('Unmapped country-specific record type; verify its national scope first')
     records = parse_records(root,url,hashlib.sha256(data).hexdigest(),list_id)
     if not records: raise ValueError('Empty record file; keep the previous snapshot')
     if len(records) != len(root.findall('.//RECORDLIST/RECORDS/RECORD')):
@@ -119,6 +118,31 @@ def parse_snapshot(data, list_id, course, url):
     canonical = [dict(asdict(r), source_hash='') for r in records]
     content_hash = hashlib.sha256(json.dumps(canonical,sort_keys=True,default=str).encode()).hexdigest()
     return records,content_hash
+
+def snapshot_inventory(records):
+    definitions = {}
+    for record in records:
+        key = (record.record_list_name, record.nation, record.record_type,
+               record.gender, record.age_min, record.age_max,
+               record.comparison_scope, record.scope_reason)
+        item = definitions.setdefault(key, {
+            'name': record.record_list_name, 'nation': record.nation,
+            'type': record.record_type, 'gender': record.gender,
+            'age_min': record.age_min, 'age_max': record.age_max,
+            'comparison_scope': record.comparison_scope,
+            'scope_reason': record.scope_reason, 'records': 0, 'splits': 0,
+        })
+        item['records'] += 1
+        item['splits'] += len(record.splits)
+    return list(definitions.values())
+
+
+def write_report(path, report):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + '.part')
+    tmp.write_text(json.dumps(report, indent=2) + '\n')
+    tmp.replace(path)
+
 
 def publish_snapshot(conn,records,content_hash,list_id,course):
     with conn.cursor() as cur:
@@ -145,7 +169,7 @@ def report_failure(conn,list_id,course,error):
           ON CONFLICT(record_list_id,course) DO UPDATE SET status='failed',checked_at=now(),error=excluded.error""",(list_id,course,str(error)[:500]))
     conn.commit()
 
-def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/records'),dry_run=False,delay=1,catalogue_provided=False,catalogue_url=CATALOGUE):
+def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/records'),dry_run=False,delay=1,catalogue_provided=False,catalogue_url=CATALOGUE,inventory_path=None):
     known=set(list_ids)
     if conn:
         with conn.cursor() as cur:
@@ -158,26 +182,43 @@ def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/re
                     cur.execute('SELECT DISTINCT record_list_id FROM swimrankings_records')
                     known.update(r[0] for r in cur.fetchall())
         conn.commit()
-    report={'catalogue':'ok','files':[],'errors':[]}
+    report={'catalogue':'ok','started_at':datetime.now(timezone.utc).isoformat(),
+            'catalogue_source':catalogue_url,'inventory':{},'files':[],'errors':[]}
+    if inventory_path and inventory_path.exists() and not catalogue_provided:
+        saved=json.loads(inventory_path.read_text())
+        report['inventory'].update(saved.get('inventory',{}))
+        known.update(report['inventory'])
+        report['previous_catalogue_at']=saved.get('checked_at')
     try:
         try:
             if catalogue_html is not None:
                 known.update(discover_lists(catalogue_html))
+                parser=CatalogueParser();parser.feed(catalogue_html)
+                report['inventory'].update(parser.entries)
+                report['catalogue']='provided_files_only' if catalogue_provided else 'saved_html'
+                report['catalogue_source']='offline bundle' if catalogue_provided else 'saved HTML'
+                report['catalogue_sha256']=hashlib.sha256(catalogue_html.encode()).hexdigest()
             else:
-                discovered, errors = discover_catalogue(client,catalogue_url,delay)
+                discovered, errors = discover_catalogue(client,catalogue_url,delay,report['inventory'])
                 known.update(discovered)
                 if errors: raise ValueError('; '.join(errors))
             if conn and not dry_run and not catalogue_provided:
                 with conn.cursor() as cur:
                     cur.execute(SCHEMA)
-                    cur.execute("""INSERT INTO swimrankings_record_refresh(record_list_id,course,status,successful_at) VALUES('catalogue','','ok',now())
-                      ON CONFLICT(record_list_id,course) DO UPDATE SET status='ok',checked_at=now(),successful_at=now(),error=null""")
+                    cur.execute("""INSERT INTO swimrankings_record_refresh(record_list_id,course,status,successful_at) VALUES('catalogue','',%s,now())
+                      ON CONFLICT(record_list_id,course) DO UPDATE SET status=excluded.status,checked_at=now(),successful_at=now(),error=null""",(report['catalogue'],))
                 conn.commit()
         except Exception as error:
             report['catalogue']='failed';report['errors'].append({'catalogue':str(error)})
             if conn and not dry_run: report_failure(conn,'catalogue','',error)
             # Catalogue access is separate from the known RecordLenex service.
-        if not known: known.update(DEFAULT_RECORD_LIST_IDS)
+        if not known:
+            known.update(DEFAULT_RECORD_LIST_IDS)
+            report['seed_lists_only']=True
+        report['requested_lists']=sorted(known,key=int)
+        if inventory_path and report['inventory'] and not catalogue_provided:
+            write_report(inventory_path,{'checked_at':report['started_at'],'status':report['catalogue'],
+                'source':report['catalogue_source'],'inventory':report['inventory']})
         for list_id in sorted(known,key=int):
             for course in ('LCM','SCM'):
                 url=build_record_lenex_url(list_id,course,'fina_2025','us')
@@ -188,8 +229,10 @@ def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/re
                     path=save_dir/f'swimrankings_records_{list_id}_{course}.lxf'
                     tmp=path.with_suffix('.part');tmp.write_bytes(downloaded.data);tmp.replace(path)
                     changed=publish_snapshot(conn,records,fingerprint,list_id,course) if conn and not dry_run else False
-                    item={'list':list_id,'course':course,'records':len(records),'splits':sum(len(r.splits) for r in records),'changed':changed,'dry_run':dry_run}
-                    report['files'].append(item);print(json.dumps(item),flush=True)
+                    item={'list':list_id,'course':course,'records':len(records),'splits':sum(len(r.splits) for r in records),'changed':changed,'dry_run':dry_run,
+                          'source_url':url,'sha256':hashlib.sha256(downloaded.data).hexdigest(),
+                          'content_hash':fingerprint,'definitions':snapshot_inventory(records)}
+                    report['files'].append(item);print(json.dumps({k:v for k,v in item.items() if k != 'definitions'}),flush=True)
                 except Exception as error:
                     report['errors'].append({'list':list_id,'course':course,'error':str(error)})
                     if conn and not dry_run:report_failure(conn,list_id,course,error)
@@ -198,6 +241,12 @@ def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/re
                 time.sleep(max(0,delay))
         return report
     finally:
+        report['finished_at']=datetime.now(timezone.utc).isoformat()
+        report['complete_published_catalogue']=report['catalogue']=='ok' and not report['errors']
+        report['countries_with_comparisons']=sorted({d['nation'] for f in report['files'] for d in f['definitions']
+            if d['nation'] and d['comparison_scope'] in ('national','age')})
+        report['unmapped_definitions']=[dict(list=f['list'],course=f['course'],**d)
+            for f in report['files'] for d in f['definitions'] if d['comparison_scope']=='unmapped']
         if conn:
             with conn.cursor() as cur:cur.execute('SELECT pg_advisory_unlock(734341)')
             conn.commit()
@@ -212,6 +261,7 @@ def main():
     p.add_argument('--dry-run',action='store_true')
     p.add_argument('--save-dir',type=Path,default=Path('data/records'))
     p.add_argument('--report',type=Path)
+    p.add_argument('--inventory',type=Path,help='Persist published IDs for retry when catalogue is unavailable')
     a=p.parse_args()
     if any(not value.isdigit() for value in a.record_list_id):p.error('Record list IDs must be numeric')
     url=urlparse(a.catalogue_url)
@@ -233,9 +283,9 @@ def main():
                     path=a.input_directory/f"swimrankings_records_{args['RecordListId'][0]}_{args['Course'][0]}.lxf"
                     return DownloadedFile(path.read_bytes(),url,'application/zip')
             client=Files()
-        report=refresh(conn,client,catalogue_html=catalogue_html,list_ids=a.record_list_id,save_dir=a.save_dir,dry_run=a.dry_run,catalogue_provided=bool(a.input_directory),catalogue_url=a.catalogue_url)
+        report=refresh(conn,client,catalogue_html=catalogue_html,list_ids=a.record_list_id,save_dir=a.save_dir,dry_run=a.dry_run,catalogue_provided=bool(a.input_directory),catalogue_url=a.catalogue_url,inventory_path=a.inventory)
         if a.input_directory:report['catalogue']='provided_files_only'
-        if a.report:a.report.parent.mkdir(parents=True,exist_ok=True);a.report.write_text(json.dumps(report,indent=2))
+        if a.report:write_report(a.report,report)
         print(json.dumps(report,indent=2))
         return 1 if report['errors'] else 0
     finally:
