@@ -20,3 +20,13 @@ Files in this folder:
 - `scriptInventory.md`: grouped overview of the Python scripts currently in the repo.
 - `activeContext.md`: current repository state, risks, and observed gaps.
 - `progress.md`: what is already understood and the most useful next steps.
+
+## 2026-09-28 — continental record fallback and country discovery
+
+Owner permits missing national lists: disable that comparison while retaining
+applicable continental and World records. The 54 supplied country URLs are
+ranking navigation seeds; do not infer official national records from them.
+World Aquatics' public records feed supplies verified Americas/Africa/Asia/Oceania
+records, with no manufactured splits. Europe/World retain their LENEX sources.
+Read the country-records runbook for source mapping, preview evidence and actual
+local/AWS publication state. No scheduler is to be configured.

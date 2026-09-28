@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 from uuid import uuid4
+from urllib.error import HTTPError
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import refresh_country_records as r
 from swimrankings_http import DownloadedFile
@@ -35,6 +36,41 @@ class Parse(unittest.TestCase):
         self.assertEqual(len(ids),200)
         self.assertEqual(errors,[])
         self.assertEqual(client.download.call_count,1)
+    def test_owner_country_registry_and_blocked_host_reporting(self):
+        pages=r.load_country_pages(r.COUNTRY_PAGES)
+        self.assertEqual(len(pages),54)
+        self.assertEqual(pages['ESP'],'https://www.swimrankings.net/index.php?page=rankingDetail&club=ESP')
+        self.assertTrue(pages['SVK'].startswith('https://www.swimmsvk.sk/'))
+        client=Mock()
+        def download(url):
+            if url==r.CATALOGUE:
+                error=HTTPError(url,403,'Forbidden',{},None);error.close();raise error
+            if url==pages['SVK']:
+                return DownloadedFile('<title>Ľutujeme, stránka sa nenašla</title>'.encode(),url,'text/html')
+            raise AssertionError('Blocked provider must not be retried once per country')
+        client.download.side_effect=download
+        outcomes=[]
+        ids,errors=r.discover_catalogue(client,delay=0,country_pages=pages,page_reports=outcomes)
+        self.assertEqual(ids,[])
+        self.assertTrue(errors)
+        self.assertEqual(client.download.call_count,2)
+        self.assertEqual(sum(p['status']=='skipped_blocked_host' for p in outcomes),53)
+        self.assertEqual(next(p['status'] for p in outcomes if p['url']==pages['SVK']),'unavailable_page')
+    def test_country_pages_discover_ids_but_not_ranking_rows(self):
+        client=Mock()
+        pages={'ESP':'https://www.swimrankings.net/index.php?page=rankingDetail&club=ESP'}
+        client.download.side_effect=lambda url:DownloadedFile(
+            (b'<a href="?page=recordDetail&recordListId=51000">National records</a>' if url==pages['ESP'] else b'<p>National rankings: #1 Fastest swimmer</p>'),url,'text/html')
+        outcomes=[]
+        ids,errors=r.discover_catalogue(client,delay=0,country_pages=pages,page_reports=outcomes)
+        self.assertEqual(ids,['51000']);self.assertEqual(errors,[])
+        self.assertEqual(outcomes[0]['status'],'no_record_links')
+        self.assertEqual(outcomes[1]['status'],'record_links_found')
+    def test_country_registry_rejects_unapproved_hosts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'pages.json'
+            path.write_text('{"countries":{"ESP":"https://unrelated.example/"}}')
+            with self.assertRaises(ValueError):r.load_country_pages(path)
     def test_catalogue_failure_keeps_ids_already_discovered(self):
         client=Mock()
         client.download.side_effect=[DownloadedFile(b'<a href="?recordListId=51000">Records</a><a href="?page=rankingDetail&amp;nationId=1">ESP</a>',r.CATALOGUE,'text/html'),ValueError('Unavailable')]

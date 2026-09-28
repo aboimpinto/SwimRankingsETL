@@ -158,3 +158,57 @@ successful live catalogue crawl is still needed to enumerate all published IDs.
 Keep [issue #29](https://github.com/aboimpinto/SwimRankingsETL/issues/29) and PR #30
 open until that coverage is actually verified. Website release state is separate
 from source-data refresh state.
+
+## Country navigation and continental fallback — owner clarification
+
+`config/record-country-pages.json` retains the owner's 54 country navigation URLs.
+These are ranking pages, not official record-list IDs. Normal online discovery
+checks these alongside the record catalogue, records each outcome, and skips
+remaining pages on a host after access rejection. The separately hosted Slovak
+URL currently returns a page-not-found message with HTTP 200. Neither an access
+failure nor a page without record links proves the country has no records.
+
+For a read-only link audit without record downloads or database access:
+
+```bash
+python3 scripts/refresh_country_records.py --discover-only \
+  --report /path/to/country-navigation.json
+```
+
+Missing national/age coverage disables only that comparison. Continental and
+World records remain independent. The country comparison follows the selected
+swimmer nationality, using World Aquatics' continental federation mapping; it is
+not based on the competition venue or club. Canada uses **Americas**, not Europe.
+"American records" meaning USA national records, Pan-American Games records and
+Pan-Pacific championship records must not be substituted for Americas records.
+
+The manual pipeline now also runs `refresh_continental_records.py`. It uses the
+public JSON service backing the official
+[World Aquatics Records page](https://www.worldaquatics.com/swimming/records) for
+Americas (AM), Africa (AF), Asia (AS) and Oceania (OC). European and World records
+continue through their existing SwimRankings LENEX lists. Sources retain distinct
+`WA-<code>` list IDs; the LENEX updater ignores these IDs when building download
+URLs. The app uses the reviewed `comparison_scope`.
+
+The World Aquatics page's published JavaScript maps continent names to these
+codes and sends `recordCode`, `gender` and **`pool`** to
+`https://api.worldaquatics.com/fina/records/SW`. `poolConfiguration` is not the
+correct request parameter for this endpoint: it silently returns LCM. Responses
+are validated against expected pool, gender, record code, pagination count and
+unique provider IDs. `=AM` and equivalent markers mean tied records and are
+retained; only approved source status 2 is used in comparisons. Other statuses
+are retained as excluded/pending. The importer does not manufacture split times
+from final times. These records currently supply final time and average speed;
+intermediate split comparisons remain unavailable where measurements are absent.
+
+A run retains `continental.json` and eight `worldaquatics_records_*.json` bundles
+alongside its LENEX files. Both source adapters publish before the application
+import. Failed continental refreshes preserve their last good snapshot, and
+successful national lists still publish. The exit status and receipt expose each
+provider's failure separately. Offline delivery must include both providers'
+files from the validated run. `--skip-continental` explicitly supports a legacy
+LENEX-only bundle; it is not the normal weekly refresh.
+
+The read-only continental preview on 28 September validated **378 records** across
+all eight list/course bundles. This is download validation; import receipts must
+be checked separately before claiming local/AWS publication.

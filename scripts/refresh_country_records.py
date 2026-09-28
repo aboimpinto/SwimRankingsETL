@@ -22,6 +22,20 @@ from swimrankings_http import (
 )
 
 CATALOGUE = 'https://www.swimrankings.net/index.php?page=recordSelect'
+COUNTRY_PAGES = Path(__file__).resolve().parents[1] / 'config/record-country-pages.json'
+DISCOVERY_HOSTS = ('www.swimrankings.net', 'swimrankings.net', 'www.swimmsvk.sk', 'swimmsvk.sk')
+
+
+def load_country_pages(path):
+    pages = json.loads(path.read_text())['countries']
+    for country, url in pages.items():
+        target = urlparse(url)
+        if len(country) != 3 or not country.isascii() or not country.isalpha() or not country.isupper():
+            raise ValueError('Country discovery codes must have three uppercase letters')
+        if target.scheme != 'https' or target.netloc not in DISCOVERY_HOSTS:
+            raise ValueError('Country discovery pages must use an approved HTTPS provider host')
+    return pages
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS swimrankings_record_refresh (
  record_list_id text NOT NULL, course text NOT NULL,
@@ -34,12 +48,13 @@ CREATE TABLE IF NOT EXISTS swimrankings_record_refresh (
 
 class CatalogueParser(HTMLParser):
     def __init__(self):
-        super().__init__(); self.ids = set(); self.pages = set(); self.anchor = None; self.label = []; self.entries = {}; self.anchor_ids = []
+        super().__init__(); self.ids = set(); self.pages = set(); self.anchor = None; self.label = []; self.entries = {}; self.anchor_ids = []; self.in_title = False; self.title = []
     def handle_starttag(self, tag, attrs):
+        if tag == 'title': self.in_title = True
         if tag != 'a': return
         href = dict(attrs).get('href', '')
         url = urlparse(href)
-        if url.netloc and url.netloc not in ('www.swimrankings.net','swimrankings.net'): return
+        if url.netloc and url.netloc not in DISCOVERY_HOSTS: return
         self.anchor = href; self.label = []; self.anchor_ids = []
         for key, values in parse_qs(url.query).items():
             if key.lower() == 'recordlistid':
@@ -48,9 +63,11 @@ class CatalogueParser(HTMLParser):
 
 
     def handle_data(self, text):
+        if self.in_title: self.title.append(text)
         if self.anchor is not None: self.label.append(text)
 
     def handle_endtag(self, tag):
+        if tag == 'title': self.in_title = False
         if tag != 'a' or self.anchor is None: return
         query = parse_qs(urlparse(self.anchor).query)
         page = query.get('page', [''])[0].lower()
@@ -68,34 +85,58 @@ class CatalogueParser(HTMLParser):
         self.anchor = None
 
 
-def discover_catalogue(client, url=CATALOGUE, delay=1, inventory=None):
-    pending = [(url, 0)]
-    visited, ids, errors = set(), set(), []
+def discover_catalogue(client, url=CATALOGUE, delay=1, inventory=None,
+                       country_pages=None, page_reports=None):
+    pending = [(url, 0)] + [(page, 0) for page in (country_pages or {}).values()]
+    visited, ids, errors, blocked_hosts = set(), set(), [], set()
+    outcomes = page_reports if page_reports is not None else []
+    requested = 0
     while pending:
         page_url, depth = pending.pop(0)
-        if page_url in visited: continue
-        if len(visited) >= 100:
+        if page_url in visited:
+            continue
+        visited.add(page_url)
+        host = urlparse(page_url).netloc.removeprefix('www.')
+        if host in blocked_hosts:
+            outcomes.append({'url': page_url, 'status': 'skipped_blocked_host', 'record_ids': []})
+            continue
+        if requested >= 100:
+            outcomes.append({'url': page_url, 'status': 'request_limit', 'record_ids': []})
             errors.append('Catalogue navigation exceeds 100 pages; discovery is incomplete')
             break
-        visited.add(page_url)
+        if requested:
+            time.sleep(max(0, delay))
+        requested += 1
         try:
             downloaded = client.download(page_url)
             parser = CatalogueParser()
             parser.feed(downloaded.data.decode('utf-8', errors='replace'))
+            title = ''.join(parser.title).strip()
+            if any(text in title.casefold() for text in ('page not found', 'stránka sa nenašla')):
+                outcomes.append({'url': page_url, 'status': 'unavailable_page', 'title': title, 'record_ids': []})
+                errors.append('Country/catalogue page is unavailable: ' + page_url)
+                continue
             ids.update(parser.ids)
-            if inventory is not None: inventory.update(parser.entries)
+            if inventory is not None:
+                inventory.update(parser.entries)
+            outcomes.append({'url': page_url, 'final_url': downloaded.final_url,
+                             'status': 'record_links_found' if parser.ids else 'no_record_links',
+                             'record_ids': sorted(parser.ids, key=int), 'title': title})
             if depth < 2:
                 for href in sorted(parser.pages):
-                    linked = urljoin(page_url, href)
+                    linked = urljoin(downloaded.final_url, href)
                     target = urlparse(linked)
-                    if target.scheme == 'https' and target.netloc in ('www.swimrankings.net', 'swimrankings.net'):
+                    if target.scheme == 'https' and target.netloc in DISCOVERY_HOSTS:
                         pending.append((linked, depth + 1))
         except Exception as error:
             errors.append(str(error))
+            outcomes.append({'url': page_url, 'status': 'failed', 'error': str(error), 'record_ids': []})
             if isinstance(error, (SwimRankingsAuthenticationError, SwimRankingsRateLimitError)) or isinstance(error, HTTPError) and error.code in (401, 403, 429):
-                break
-        if pending: time.sleep(max(0, delay))
-    if not ids: errors.append('Catalogue contains no record-list links; keep previous catalogue')
+                # Do not make 54 copies of the same blocked-host request. The
+                # separately hosted federation page can still be checked.
+                blocked_hosts.add(host)
+    if not ids:
+        errors.append('Catalogue contains no record-list links; keep previous catalogue')
     return sorted(ids, key=int), errors
 
 def discover_lists(html):
@@ -169,7 +210,7 @@ def report_failure(conn,list_id,course,error):
           ON CONFLICT(record_list_id,course) DO UPDATE SET status='failed',checked_at=now(),error=excluded.error""",(list_id,course,str(error)[:500]))
     conn.commit()
 
-def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/records'),dry_run=False,delay=1,catalogue_provided=False,catalogue_url=CATALOGUE,inventory_path=None):
+def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/records'),dry_run=False,delay=1,catalogue_provided=False,catalogue_url=CATALOGUE,inventory_path=None,country_pages=None):
     known=set(list_ids)
     if conn:
         with conn.cursor() as cur:
@@ -180,10 +221,10 @@ def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/re
                 cur.execute("SELECT to_regclass('swimrankings_records')")
                 if cur.fetchone()[0] is not None:
                     cur.execute('SELECT DISTINCT record_list_id FROM swimrankings_records')
-                    known.update(r[0] for r in cur.fetchall())
+                    known.update(r[0] for r in cur.fetchall() if r[0].isdigit())
         conn.commit()
     report={'catalogue':'ok','started_at':datetime.now(timezone.utc).isoformat(),
-            'catalogue_source':catalogue_url,'inventory':{},'files':[],'errors':[]}
+            'catalogue_source':catalogue_url,'inventory':{},'files':[],'errors':[],'discovery_pages':[]}
     if inventory_path and inventory_path.exists() and not catalogue_provided:
         saved=json.loads(inventory_path.read_text())
         report['inventory'].update(saved.get('inventory',{}))
@@ -199,7 +240,7 @@ def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/re
                 report['catalogue_source']='offline bundle' if catalogue_provided else 'saved HTML'
                 report['catalogue_sha256']=hashlib.sha256(catalogue_html.encode()).hexdigest()
             else:
-                discovered, errors = discover_catalogue(client,catalogue_url,delay,report['inventory'])
+                discovered, errors = discover_catalogue(client,catalogue_url,delay,report['inventory'],country_pages,report['discovery_pages'])
                 known.update(discovered)
                 if errors: raise ValueError('; '.join(errors))
             if conn and not dry_run and not catalogue_provided:
@@ -241,6 +282,9 @@ def refresh(conn,client,*,catalogue_html=None,list_ids=(),save_dir=Path('data/re
                 time.sleep(max(0,delay))
         return report
     finally:
+        page_outcomes={p['url']:p for p in report['discovery_pages']}
+        report['country_discovery']={country:page_outcomes.get(url,{'url':url,'status':'not_checked','record_ids':[]})
+            for country,url in (country_pages or {}).items()}
         report['finished_at']=datetime.now(timezone.utc).isoformat()
         report['complete_published_catalogue']=report['catalogue']=='ok' and not report['errors']
         report['countries_with_comparisons']=sorted({d['nation'] for f in report['files'] for d in f['definitions']
@@ -261,11 +305,24 @@ def main():
     p.add_argument('--dry-run',action='store_true')
     p.add_argument('--save-dir',type=Path,default=Path('data/records'))
     p.add_argument('--report',type=Path)
+    p.add_argument('--country-pages',type=Path,default=COUNTRY_PAGES,help='JSON country navigation registry (not record-list IDs)')
+    p.add_argument('--discover-only',action='store_true',help='Inspect catalogue/country links without downloading or importing record files')
     p.add_argument('--inventory',type=Path,help='Persist published IDs for retry when catalogue is unavailable')
     a=p.parse_args()
     if any(not value.isdigit() for value in a.record_list_id):p.error('Record list IDs must be numeric')
     url=urlparse(a.catalogue_url)
     if url.scheme != 'https' or url.netloc not in ('www.swimrankings.net','swimrankings.net'):p.error('Catalogue must be an HTTPS SwimRankings URL')
+    if a.discover_only:
+        if a.input_directory or a.catalogue_html:p.error('--discover-only requires online navigation, not saved files')
+        pages=load_country_pages(a.country_pages)
+        outcomes=[];inventory={}
+        ids,errors=discover_catalogue(SwimRankingsHttpClient.from_environment(),a.catalogue_url,country_pages=pages,page_reports=outcomes,inventory=inventory)
+        by_url={p['url']:p for p in outcomes}
+        report={'checked_at':datetime.now(timezone.utc).isoformat(),'record_list_ids':ids,'inventory':inventory,'errors':errors,
+                'discovery_pages':outcomes,'country_discovery':{c:by_url.get(u,{'url':u,'status':'not_checked','record_ids':[]}) for c,u in pages.items()}}
+        if a.report:write_report(a.report,report)
+        print(json.dumps(report,indent=2))
+        return 1 if errors else 0
     if not a.dry_run and not a.config:p.error('--config is required for database updates')
     import psycopg2
     conn=psycopg2.connect(**json.loads(a.config.read_text())) if a.config else None
@@ -283,7 +340,7 @@ def main():
                     path=a.input_directory/f"swimrankings_records_{args['RecordListId'][0]}_{args['Course'][0]}.lxf"
                     return DownloadedFile(path.read_bytes(),url,'application/zip')
             client=Files()
-        report=refresh(conn,client,catalogue_html=catalogue_html,list_ids=a.record_list_id,save_dir=a.save_dir,dry_run=a.dry_run,catalogue_provided=bool(a.input_directory),catalogue_url=a.catalogue_url,inventory_path=a.inventory)
+        report=refresh(conn,client,catalogue_html=catalogue_html,list_ids=a.record_list_id,save_dir=a.save_dir,dry_run=a.dry_run,catalogue_provided=bool(a.input_directory),catalogue_url=a.catalogue_url,inventory_path=a.inventory,country_pages=load_country_pages(a.country_pages))
         if a.input_directory:report['catalogue']='provided_files_only'
         if a.report:write_report(a.report,report)
         print(json.dumps(report,indent=2))

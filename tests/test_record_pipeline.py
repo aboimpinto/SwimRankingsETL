@@ -23,6 +23,7 @@ args = sys.argv[1:]
 Path(args[args.index('--report') + 1]).write_text('{"files": []}')
 sys.exit(int(os.environ.get('SOURCE_EXIT', '0')))
 ''')
+        (self.root / 'scripts/refresh_continental_records.py').write_text((self.root / 'scripts/refresh_country_records.py').read_text().replace('SOURCE_EXIT', 'CONTINENTAL_EXIT'))
         consumer = self.root / 'consumer.sh'
         consumer.write_text('touch "$RECORD_STATE_DIR/consumer-ran"\nexit "${CONSUMER_EXIT:-0}"\n')
         self.env = dict(os.environ, ETL_ROOT=str(self.root), RECORD_STATE_DIR=str(self.root / 'state'),
@@ -41,12 +42,24 @@ sys.exit(int(os.environ.get('SOURCE_EXIT', '0')))
         self.assertTrue(self.receipt()['dry_run'])
         self.assertTrue((Path(self.receipt()['run']) / 'run.log').exists())
 
+    def test_discovery_only_skips_consumer(self):
+        result = self.run_pipeline('--discover-only')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / 'state/consumer-ran').exists())
+        self.assertFalse(self.receipt()['consumer_ran'])
+
     def test_source_failure_publishes_health_but_returns_failure(self):
         self.env['SOURCE_EXIT'] = '7'
         self.assertNotEqual(self.run_pipeline().returncode, 0)
         self.assertTrue((self.root / 'state/consumer-ran').exists())
         self.assertEqual(self.receipt()['source_exit'], 7)
         self.assertEqual(self.receipt()['status'], 'failed')
+
+    def test_continental_failure_does_not_hide_source_publication(self):
+        self.env['CONTINENTAL_EXIT'] = '8'
+        self.assertNotEqual(self.run_pipeline().returncode, 0)
+        self.assertTrue((self.root / 'state/consumer-ran').exists())
+        self.assertEqual(self.receipt()['continental_exit'], 8)
 
     def test_consumer_failure_is_not_hidden(self):
         self.env['CONSUMER_EXIT'] = '9'
