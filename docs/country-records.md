@@ -142,7 +142,14 @@ Additional LENEX downloads have been verified against links published by the
 (Netherlands 50030/50031 and archived 50032),
 [the Faroese federation](https://ssf.fo/kapping/met/foroysk-met-25m/) (50057), and
 [Swiss Aquatics](https://www.swiss-aquatics.ch/masters-schweizerrekorde-masters-kurzbahnschweizerrekorde/)
-(Masters 50069). Download verification alone is not a database import receipt.
+(Masters 50069). These 10 additional files were subsequently imported into both
+canonical databases and both SwimProfiles app databases: **3,374 total records /
+13,031 splits**. This includes 201 archived Dutch rows, retained for provenance
+and excluded from current comparisons. The remaining new rows add Netherlands,
+Faroe Islands and Swiss Masters coverage. Raw file hashes were verified after
+SSH transfer; local replay changed zero source snapshots and zero app rows.
+Run evidence is retained under each configured state directory. Full published
+catalogue enumeration is still unfinished.
 
 The main catalogue currently returns a Cloudflare browser challenge (403) to the
 ETL, while RecordLenex downloads work. The owner's screenshots confirm more lists

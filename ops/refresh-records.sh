@@ -34,6 +34,7 @@ printf 'Record refresh evidence: %s\n' "$run_dir"
 source_status=0
 consumer_status=0
 audit_status=0
+audit_ran=false
 "${RECORD_PYTHON:-python3}" "$ETL_ROOT/scripts/refresh_country_records.py" \
   --config "$RECORD_DB_CONFIG" --save-dir "$run_dir/files" \
   --inventory "$RECORD_STATE_DIR/catalogue.json" --report "$run_dir/source.json" "$@" || source_status=$?
@@ -43,10 +44,11 @@ if ! "$preview"; then
     /bin/bash "$RECORD_CONSUMER_SCRIPT" || consumer_status=$?
   else
     (cd "$SWIMPROFILES_ROOT" && "${RECORD_PNPM:-pnpm}" import:records) || consumer_status=$?
+    audit_ran=true
     (cd "$SWIMPROFILES_ROOT" && "${RECORD_PNPM:-pnpm}" audit:records > "$run_dir/coverage.json") || audit_status=$?
   fi
 fi
-"${RECORD_PYTHON:-python3}" - "$run_dir" "$source_status" "$consumer_status" "$audit_status" "$preview" <<'PY'
+"${RECORD_PYTHON:-python3}" - "$run_dir" "$source_status" "$consumer_status" "$audit_status" "$preview" "$audit_ran" <<'PY'
 import json, sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,6 +56,11 @@ run = Path(sys.argv[1])
 result = dict(finished_at=datetime.now(timezone.utc).isoformat(),
               source_exit=int(sys.argv[2]), consumer_exit=int(sys.argv[3]),
               audit_exit=int(sys.argv[4]), dry_run=sys.argv[5] == 'true', run=str(run))
+result['consumer_ran'] = not result['dry_run']
+result['audit_ran'] = sys.argv[6] == 'true'
+source = json.loads((run / 'source.json').read_text()) if (run / 'source.json').exists() else {}
+result['catalogue'] = source.get('catalogue', 'unavailable')
+result['complete_published_catalogue'] = source.get('complete_published_catalogue', False)
 result['status'] = 'failed' if any(result[k] for k in ('source_exit','consumer_exit','audit_exit')) else 'ok'
 (run / 'pipeline.json').write_text(json.dumps(result, indent=2) + '\n')
 latest = run.parent.parent / 'latest.json'
