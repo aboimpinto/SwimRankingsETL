@@ -155,9 +155,10 @@ The main catalogue currently returns a Cloudflare browser challenge (403) to the
 ETL, while RecordLenex downloads work. The owner's screenshots confirm more lists
 exist, including countries not yet configured. The complete saved HTML or a
 successful live catalogue crawl is still needed to enumerate all published IDs.
-Keep [issue #29](https://github.com/aboimpinto/SwimRankingsETL/issues/29) and PR #30
-open until that coverage is actually verified. Website release state is separate
-from source-data refresh state.
+The owner subsequently accepted unavailable national lists: those comparisons
+remain unavailable while verified continental/World comparisons work. Broader
+national catalogue coverage remains a documented limitation, not a claim of
+completion. Website release state is separate from source-data refresh state.
 
 ## Country navigation and continental fallback — owner clarification
 
@@ -210,5 +211,8 @@ files from the validated run. `--skip-continental` explicitly supports a legacy
 LENEX-only bundle; it is not the normal weekly refresh.
 
 The read-only continental preview on 28 September validated **378 records** across
-all eight list/course bundles. This is download validation; import receipts must
-be checked separately before claiming local/AWS publication.
+all eight list/course bundles. Those records were then published into both local and AWS canonical/app
+databases, bringing each snapshot to **3,752 records / 13,031 measured splits**.
+All eight continental bundle hashes were checked after SSH transfer. Local
+source/app replay changed zero records. Run receipts retain per-provider hashes,
+counts and outcomes; this data publication does not deploy the website UI.
