@@ -30,3 +30,5 @@ World Aquatics' public records feed supplies verified Americas/Africa/Asia/Ocean
 records, with no manufactured splits. Europe/World retain their LENEX sources.
 Read the country-records runbook for source mapping, preview evidence and actual
 local/AWS publication state. No scheduler is to be configured.
+
+For each weekly records refresh, follow the [manual operator checklist](../docs/weekly-record-refresh.md). It documents the installed entry points, preview review, matching local/AWS delivery, receipt verification and retries; scheduling remains disabled.
