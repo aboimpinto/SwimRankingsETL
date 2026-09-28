@@ -1,0 +1,32 @@
+name: Country records
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/*records*', 'scripts/import_Swiss_NationalRecords.py', 'scripts/swimrankings_http.py', 'tests/test_country_records.py', 'tests/test_swimrankings_http.py', 'ops/*records*', '.github/workflows/country-records.yml']
+  pull_request:
+    paths: ['scripts/*records*', 'scripts/import_Swiss_NationalRecords.py', 'scripts/swimrankings_http.py', 'tests/test_country_records.py', 'tests/test_swimrankings_http.py', 'ops/*records*', '.github/workflows/country-records.yml']
+permissions:
+  contents: read
+jobs:
+  records:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: records_test
+          POSTGRES_PASSWORD: records_test
+          POSTGRES_DB: records_test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-delivery.txt
+      - run: python -m unittest discover -s tests -p test_swimrankings_http.py -v
+      - run: python -m unittest discover -s tests -p test_country_records.py -v
+        env:
+          RECORD_TEST_DSN: postgresql://records_test:records_test@localhost:5432/records_test
+      - run: bash -n ops/refresh-records.sh

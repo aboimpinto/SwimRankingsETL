@@ -8,6 +8,8 @@ Important repo boundary:
 - Most historical scripts start from already-downloaded files stored under paths such as `/workspace/data/lenex` and `/workspace/data/processed`.
 - The newer `import_live_swimrankings_meet.py` and `import_live_swimrankings_month.py` scripts can download public LENEX result files from SwimRankings live endpoints before importing them.
 
+Official national/age-group records now have a separate [refresh/delivery runbook](../docs/country-records.md). These are distinct from meet and club-record snapshots. Read its verified coverage before claiming country completeness.
+
 Files in this folder:
 - `club-rankings.md`: complete all-time Open rankings, pagination and per-performance club evidence.
 - `club-record-baselines.md`: desktop collection, validation and incremental publication of official club-record baselines.
