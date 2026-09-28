@@ -27,6 +27,14 @@ class Parse(unittest.TestCase):
         ids,errors=r.discover_catalogue(client,delay=0)
         self.assertEqual(ids,['51000']);self.assertEqual(errors,[])
         self.assertEqual(client.download.call_count,3)
+    def test_full_catalogue_does_not_crawl_every_record_detail(self):
+        client=Mock()
+        html=''.join(f'<a href="?page=recordDetail&recordListId={i}">Records {i}</a>' for i in range(50000,50200))
+        client.download.return_value=DownloadedFile(html.encode(),r.CATALOGUE,'text/html')
+        ids,errors=r.discover_catalogue(client,delay=0)
+        self.assertEqual(len(ids),200)
+        self.assertEqual(errors,[])
+        self.assertEqual(client.download.call_count,1)
     def test_catalogue_failure_keeps_ids_already_discovered(self):
         client=Mock()
         client.download.side_effect=[DownloadedFile(b'<a href="?recordListId=51000">Records</a><a href="?page=rankingDetail&amp;nationId=1">ESP</a>',r.CATALOGUE,'text/html'),ValueError('Unavailable')]

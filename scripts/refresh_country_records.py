@@ -61,7 +61,7 @@ class CatalogueParser(HTMLParser):
             if self.anchor not in entry['links']: entry['links'].append(self.anchor)
         # Follow only published country navigation / record catalogue links.
         # Never crawl athlete pages or scrape individual ranking results.
-        if page in ('recordselect', 'recorddetail') or (
+        if page == 'recordselect' or (
             page.startswith('ranking') and len(label) == 3 and label.isupper() and label.isalpha()
         ):
             self.pages.add(self.anchor)
