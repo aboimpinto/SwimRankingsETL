@@ -4,6 +4,13 @@ Python tools for collecting swimming results on the desktop, importing them into
 PostgreSQL on **localServer**, and delivering incremental competition updates to
 AWS for **SophiaWalker, Colin and LimmatSharks**.
 
+## Weekly official record refresh
+
+Follow the [manual weekly record runbook](docs/weekly-record-refresh.md) to gather
+and validate available national, age-group, continental and World records, then
+publish the same files locally and on AWS. This is separate from competition
+imports below. No cron entry or timer is configured by this procedure.
+
 ## Complete production workflow
 
 ```text

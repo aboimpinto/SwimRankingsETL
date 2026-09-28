@@ -1,5 +1,7 @@
 # Published country record refresh
 
+For the weekly operator procedure, use the [manual weekly runbook](weekly-record-refresh.md): preview, review, publish locally, transfer the same files to AWS, and verify receipts. No scheduler setup is required.
+
 The **Records catalogue** is distinct from the National Rankings country menu.
 Not every country with rankings has a published official record list. Import
 published record lists; do not infer official records from ranking results.
