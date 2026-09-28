@@ -103,6 +103,10 @@ def parse_snapshot(data, list_id, course, url):
     for node in root.findall('.//RECORDLIST'):
         if node.get('region') or node.get('handicap') or node.get('clubid'):
             raise ValueError('Regional, club or disability-specific record list is not supported')
+        nation = node.get('nation', '').upper()
+        record_type = node.get('type', '')
+        if nation and record_type.startswith(nation + '.') and record_type != nation + '.JR':
+            raise ValueError('Unmapped country-specific record type; verify its national scope first')
     records = parse_records(root,url,hashlib.sha256(data).hexdigest(),list_id)
     if not records: raise ValueError('Empty record file; keep the previous snapshot')
     if len(records) != len(root.findall('.//RECORDLIST/RECORDS/RECORD')):

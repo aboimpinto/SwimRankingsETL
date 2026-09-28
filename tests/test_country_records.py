@@ -38,6 +38,8 @@ class Parse(unittest.TestCase):
         self.assertEqual(h,r.parse_snapshot(xml(age='<AGEGROUP agemin="12" agemax="12"/>'),'51000','LCM','https://www.swimrankings.net/test')[1])
         for data in (xml(extra='region="CAT"'),b'<LENEX/>',xml()):
             with self.assertRaises(ValueError):r.parse_snapshot(data,'51000','SCM','url')
+        with self.assertRaises(ValueError):
+            r.parse_snapshot(xml().replace(b'type="ESP"', b'type="ESP.REGION"'),'51000','LCM','url')
     def test_dry_run_does_not_connect_or_publish(self):
         client=Mock();client.download.return_value=DownloadedFile(xml(),'url','text/xml')
         with tempfile.TemporaryDirectory() as folder:
