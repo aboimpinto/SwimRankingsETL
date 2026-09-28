@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh official SwimRankings records and publish SwimProfiles comparisons
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/swimrankings-records/environment
+ExecStart=/bin/bash -c 'exec /bin/bash "$ETL_ROOT/ops/refresh-records.sh"'
+TimeoutStartSec=2h
+UMask=0077

@@ -77,3 +77,7 @@ media/
 *.tmp
 *.bak
 *.orig
+
+# Official record snapshots and private refresh configuration
+/data/records/
+.secrets/

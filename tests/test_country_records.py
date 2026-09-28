@@ -1,0 +1,150 @@
+import os
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import Mock
+from uuid import uuid4
+from urllib.error import HTTPError
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+import refresh_country_records as r
+from swimrankings_http import DownloadedFile
+
+def xml(time='00:01:00.00',nation='ESP',age='',extra=''):
+    return f'''<LENEX><RECORDLISTS><RECORDLIST recordlistid="51000" name="National records" type="{nation}" nation="{nation}" course="LCM" gender="F" {extra}>{age}<RECORDS><RECORD swimtime="{time}"><SWIMSTYLE distance="100" stroke="FREE" relaycount="1"/><SPLITS><SPLIT distance="50" swimtime="00:00:29.00"/></SPLITS></RECORD></RECORDS></RECORDLIST></RECORDLISTS></LENEX>'''.encode()
+
+class Parse(unittest.TestCase):
+    def test_catalogue(self):
+        self.assertEqual(r.discover_lists('<a href="index.php?page=recordDetail&amp;recordListId=51000">Spain</a><a href="?recordListId=51000">LCM</a><a href="https://evil.test/?recordListId=90000">bad</a>'),['51000'])
+        with self.assertRaises(ValueError):r.discover_lists('<html>Sign in</html>')
+    def test_home_country_navigation_discovers_only_record_list_links(self):
+        client=Mock()
+        pages={
+            r.CATALOGUE:b'<a href="index.php?page=rankingDetail&amp;nationId=1">ESP</a><a href="https://foreign.test/?page=rankingDetail">SUI</a>',
+            'https://www.swimrankings.net/index.php?page=rankingDetail&nationId=1':b'<a href="index.php?page=recordSelect&amp;nationId=1">Records</a><a href="?page=athleteDetail&amp;athleteId=1">A swimmer</a>',
+            'https://www.swimrankings.net/index.php?page=recordSelect&nationId=1':b'<a href="?page=recordDetail&amp;recordListId=51000">National records</a>'
+        }
+        client.download.side_effect=lambda url: DownloadedFile(pages[url],url,'text/html')
+        ids,errors=r.discover_catalogue(client,delay=0)
+        self.assertEqual(ids,['51000']);self.assertEqual(errors,[])
+        self.assertEqual(client.download.call_count,3)
+    def test_full_catalogue_does_not_crawl_every_record_detail(self):
+        client=Mock()
+        html=''.join(f'<a href="?page=recordDetail&recordListId={i}">Records {i}</a>' for i in range(50000,50200))
+        client.download.return_value=DownloadedFile(html.encode(),r.CATALOGUE,'text/html')
+        ids,errors=r.discover_catalogue(client,delay=0)
+        self.assertEqual(len(ids),200)
+        self.assertEqual(errors,[])
+        self.assertEqual(client.download.call_count,1)
+    def test_owner_country_registry_and_blocked_host_reporting(self):
+        pages=r.load_country_pages(r.COUNTRY_PAGES)
+        self.assertEqual(len(pages),54)
+        self.assertEqual(pages['ESP'],'https://www.swimrankings.net/index.php?page=rankingDetail&club=ESP')
+        self.assertTrue(pages['SVK'].startswith('https://www.swimmsvk.sk/'))
+        client=Mock()
+        def download(url):
+            if url==r.CATALOGUE:
+                error=HTTPError(url,403,'Forbidden',{},None);error.close();raise error
+            if url==pages['SVK']:
+                return DownloadedFile('<title>Ľutujeme, stránka sa nenašla</title>'.encode(),url,'text/html')
+            raise AssertionError('Blocked provider must not be retried once per country')
+        client.download.side_effect=download
+        outcomes=[]
+        ids,errors=r.discover_catalogue(client,delay=0,country_pages=pages,page_reports=outcomes)
+        self.assertEqual(ids,[])
+        self.assertTrue(errors)
+        self.assertEqual(client.download.call_count,2)
+        self.assertEqual(sum(p['status']=='skipped_blocked_host' for p in outcomes),53)
+        self.assertEqual(next(p['status'] for p in outcomes if p['url']==pages['SVK']),'unavailable_page')
+    def test_country_pages_discover_ids_but_not_ranking_rows(self):
+        client=Mock()
+        pages={'ESP':'https://www.swimrankings.net/index.php?page=rankingDetail&club=ESP'}
+        client.download.side_effect=lambda url:DownloadedFile(
+            (b'<a href="?page=recordDetail&recordListId=51000">National records</a>' if url==pages['ESP'] else b'<p>National rankings: #1 Fastest swimmer</p>'),url,'text/html')
+        outcomes=[]
+        ids,errors=r.discover_catalogue(client,delay=0,country_pages=pages,page_reports=outcomes)
+        self.assertEqual(ids,['51000']);self.assertEqual(errors,[])
+        self.assertEqual(outcomes[0]['status'],'no_record_links')
+        self.assertEqual(outcomes[1]['status'],'record_links_found')
+    def test_country_registry_rejects_unapproved_hosts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'pages.json'
+            path.write_text('{"countries":{"ESP":"https://unrelated.example/"}}')
+            with self.assertRaises(ValueError):r.load_country_pages(path)
+    def test_catalogue_failure_keeps_ids_already_discovered(self):
+        client=Mock()
+        client.download.side_effect=[DownloadedFile(b'<a href="?recordListId=51000">Records</a><a href="?page=rankingDetail&amp;nationId=1">ESP</a>',r.CATALOGUE,'text/html'),ValueError('Unavailable')]
+        ids,errors=r.discover_catalogue(client,delay=0)
+        self.assertEqual(ids,['51000']);self.assertEqual(errors,['Unavailable'])
+    def test_metadata_splits_and_scope(self):
+        records,h=r.parse_snapshot(xml(age='<AGEGROUP agemin="12" agemax="12"/>'),'51000','LCM','https://www.swimrankings.net/test')
+        self.assertEqual(records[0].nation,'ESP');self.assertEqual(records[0].age_min,12);self.assertEqual(len(records[0].splits),1)
+        self.assertEqual(h,r.parse_snapshot(xml(age='<AGEGROUP agemin="12" agemax="12"/>'),'51000','LCM','https://www.swimrankings.net/test')[1])
+        for data in (xml(extra='region="CAT"'),b'<LENEX/>',xml()):
+            with self.assertRaises(ValueError):r.parse_snapshot(data,'51000','SCM','url')
+        records,_=r.parse_snapshot(xml().replace(b'type="ESP"', b'type="ESP.REGION"'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'unmapped')
+        records,_=r.parse_snapshot(xml(extra='region="CAT"'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'excluded')
+    def test_masters_alias_and_archived_scope(self):
+        data=xml(nation='SUI',age='<AGEGROUP agemin="60" agemax="64"/>').replace(b'type="SUI"',b'type="SUI.MS"')
+        records,_=r.parse_snapshot(data,'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'age')
+        self.assertEqual(r.snapshot_inventory(records)[0]['age_max'],64)
+        records,_=r.parse_snapshot(xml(nation='FRO').replace(b'type="FRO"',b'type="FAR"'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'national')
+        records,_=r.parse_snapshot(xml().replace(b'National records',b'National records (until July 2024)'),'51000','LCM','url')
+        self.assertEqual(records[0].comparison_scope,'excluded')
+    def test_failed_catalogue_retries_persisted_inventory(self):
+        client=Mock()
+        def download(url):
+            if 'RecordLenex' not in url: raise ValueError('Catalogue unavailable')
+            return DownloadedFile(xml(),'url','text/xml')
+        client.download.side_effect=download
+        with tempfile.TemporaryDirectory() as folder:
+            state=Path(folder)/'catalogue.json'
+            r.write_report(state,{'inventory':{'51000':{'id':'51000','labels':['Spanish records'],'links':[]}},'checked_at':'earlier'})
+            report=r.refresh(None,client,dry_run=True,save_dir=Path(folder),inventory_path=state,delay=0)
+            self.assertEqual(report['requested_lists'],['51000'])
+            self.assertEqual(report['catalogue'],'failed')
+            self.assertFalse(report['complete_published_catalogue'])
+            self.assertEqual(report['countries_with_comparisons'],['ESP'])
+            self.assertEqual(report['files'][0]['definitions'][0]['name'],'National records')
+    def test_dry_run_does_not_connect_or_publish(self):
+        client=Mock();client.download.return_value=DownloadedFile(xml(),'url','text/xml')
+        with tempfile.TemporaryDirectory() as folder:
+            report=r.refresh(None,client,catalogue_html='<a href="?recordListId=51000">Spain</a>',dry_run=True,save_dir=Path(folder),delay=0)
+        self.assertEqual(len(report['files']),1);self.assertFalse(report['files'][0]['changed'])
+        self.assertEqual(len(report['errors']),1) # SCM payload deliberately mismatches.
+
+@unittest.skipUnless(os.environ.get('RECORD_TEST_DSN'),'Requires isolated local test schema')
+class Publication(unittest.TestCase):
+    def setUp(self):
+        import psycopg2
+        self.db=psycopg2.connect(os.environ['RECORD_TEST_DSN']);self.schema='test_records_'+uuid4().hex
+        with self.db.cursor() as c:c.execute(f'CREATE SCHEMA {self.schema}; SET search_path TO {self.schema}')
+        self.db.commit()
+    def tearDown(self):
+        self.db.rollback()
+        with self.db.cursor() as c:c.execute(f'DROP SCHEMA {self.schema} CASCADE')
+        self.db.commit();self.db.close()
+    def rows(self,sql):
+        with self.db.cursor() as c:c.execute(sql);return c.fetchall()
+    def test_replay_correction_failure_retention(self):
+        records,h=r.parse_snapshot(xml(),'51000','LCM','url')
+        self.assertTrue(r.publish_snapshot(self.db,records,h,'51000','LCM'))
+        first=self.rows('SELECT id,time_seconds FROM swimrankings_records')
+        self.assertFalse(r.publish_snapshot(self.db,records,h,'51000','LCM'))
+        self.assertEqual(first,self.rows('SELECT id,time_seconds FROM swimrankings_records'))
+        records,h=r.parse_snapshot(xml('00:00:59.00'),'51000','LCM','url')
+        self.assertTrue(r.publish_snapshot(self.db,records,h,'51000','LCM'))
+        self.assertEqual(len(self.rows('SELECT * FROM swimrankings_records')),1)
+        self.assertEqual(len(self.rows('SELECT * FROM swimrankings_record_splits')),1)
+        r.report_failure(self.db,'51000','LCM',ValueError('Network unavailable'))
+        self.assertEqual(self.rows('SELECT status,record_count FROM swimrankings_record_refresh'),[('failed',1)])
+        self.assertEqual(float(self.rows('SELECT time_seconds FROM swimrankings_records')[0][0]),59)
+    def test_dry_run_with_database_creates_no_tables(self):
+        client=Mock();client.download.return_value=DownloadedFile(xml(),'url','text/xml')
+        with tempfile.TemporaryDirectory() as folder:
+            r.refresh(self.db,client,catalogue_html='<a href="?recordListId=51000">Spain</a>',dry_run=True,save_dir=Path(folder),delay=0)
+        self.assertEqual(self.rows("SELECT count(*) FROM information_schema.tables WHERE table_schema=current_schema()"),[(0,)])
