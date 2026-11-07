@@ -49,4 +49,25 @@ Complete63 candidate matches and57 accepted badge payloads are identical after
 sorting; matching semantics, IDs and source records were unchanged. Private
 artifacts are record-match-before-index.json / record-match-after-index.json in
 SwimProfiles/artifacts and local-record-identity-index.json in the daily ETL trial.
-AWS installation and measurement are separate and remain pending.
+AWS installation was subsequently verified as described below.
+
+## AWS evidence, 7 November 2026
+
+After PR37 merged, the canonical writer applied the migration with scheduled
+imports paused and the application operation lock held. No equivalent index or
+active build existed; the database volume had19,255,418,880bytes free. Creation
+took425ms; the index is valid/ready/non-unique and6,422,528bytes.
+
+Host: existing Lightsail2vCPU/4GB,64GB database disk with192allocated IOPS.
+Actual consumer code ran from SwimProfiles-v0.1.33 in an owned read-only container
+limited to512MB/1CPU, with source/app read-only transactions. Before/after actual
+query plans took5,765.314ms/62.607ms for2,285candidates and4,582lookup loops.
+Swimmer shared hits fell2,544,222→16,396; both measured plans had0swimmer reads
+(warm samples). Complete63matches and57accepted badge payloads are identical.
+Polling resumed after verification. This is query timing, not live-update latency.
+
+Private daily-trial evidence: aws-record-match-20261107T123142Z/plans.json,
+aws-record-match-20261107T123307Z/plans.json, aws-record-identity-index.json.
+The initial diagnostic failed before querying because its environment omitted
+the app reader URL; the corrected run loads existing app and maintenance env files
+without exposing them. No application source-write permission was added.
