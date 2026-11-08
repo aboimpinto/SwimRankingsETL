@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "maxMeets": 5,
+  "maxRows": 5000,
+  "statementTimeoutMs": 30000,
+  "canonical": {
+    "configFile": "../.secrets/canonical-writer.json",
+    "expectedHost": "127.0.0.1",
+    "expectedPort": 5432,
+    "expectedDatabase": "swimrankings",
+    "expectedSchema": "public"
+  },
+  "adapters": {
+    "publish": {
+      "argv": [
+        "python3",
+        "scripts/nrt_swimprofiles_adapter.py",
+        "publish",
+        "--checkout",
+        "/path/to/SwimProfiles",
+        "--base-url",
+        "http://127.0.0.1:4340",
+        "--context",
+        "{context}",
+        "--receipt",
+        "{receipt}"
+      ],
+      "cwd": "..",
+      "timeoutSeconds": 600
+    },
+    "reconcile": {
+      "argv": [
+        "python3",
+        "scripts/nrt_swimprofiles_adapter.py",
+        "reconcile",
+        "--checkout",
+        "/path/to/SwimProfiles",
+        "--base-url",
+        "http://127.0.0.1:4340",
+        "--context",
+        "{context}",
+        "--receipt",
+        "{receipt}"
+      ],
+      "cwd": "..",
+      "timeoutSeconds": 300
+    },
+    "verify": {
+      "argv": [
+        "python3",
+        "scripts/nrt_swimprofiles_adapter.py",
+        "verify",
+        "--checkout",
+        "/path/to/SwimProfiles",
+        "--base-url",
+        "http://127.0.0.1:4340",
+        "--context",
+        "{context}",
+        "--receipt",
+        "{receipt}"
+      ],
+      "cwd": "..",
+      "timeoutSeconds": 300
+    }
+  }
+}

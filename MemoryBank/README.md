@@ -32,3 +32,15 @@ Read the country-records runbook for source mapping, preview evidence and actual
 local/AWS publication state. No scheduler is to be configured.
 
 For each weekly records refresh, follow the [manual operator checklist](../docs/weekly-record-refresh.md). It documents the installed entry points, preview review, matching local/AWS delivery, receipt verification and retries; scheduling remains disabled.
+
+## Near-real-time implementation — 8 November 2026
+
+Start with the [program](../docs/near-real-time-results-program.md),
+[manual batch commands](../docs/nrt-manual-batches.md) and
+[milestone evidence](../docs/nrt-implementation-milestone-1.md).
+The collector, recoverable batch runner and SwimProfiles adapters are implemented
+on `feat/nrt-manual-batch`. Local trial: 77 new results, one generation 46
+publication, replay unchanged, checks passed. AWS remains at last verified 40;
+the new local results have a deferred-delivery marker, not an AWS acknowledgment.
+No unattended runner/container is installed. Historical context files below may
+predate the repository's tests and documented runtime.

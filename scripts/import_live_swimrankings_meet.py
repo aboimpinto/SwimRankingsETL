@@ -105,6 +105,8 @@ def time_to_seconds(time_str: Optional[str]) -> Optional[Decimal]:
 def get_pool_length(course: Optional[str]) -> int:
     if not course:
         return 50
+    if course.strip().upper() == "OPEN":
+        return 0
     return 25 if "SCM" in course.upper() else 50
 
 

@@ -1,5 +1,15 @@
 # Active Context
 
+## Latest implementation checkpoint — 8 November 2026
+
+The [NRT milestone](../docs/nrt-implementation-milestone-1.md) supersedes older
+statements below about missing documentation/tests. A reusable manual multi-meet
+PDF batch and recovery/verification suite are implemented on the feature branch.
+Local generation 46 passed the real trial; AWS remains at verified 40 with
+explicit deferred delivery. See the milestone for measured scope and limitations.
+
+## Historical repository assessment
+
 ## Current repository state
 
 This checkout is a small, script-only ETL repository with no root documentation, no tests, and no packaging metadata. The code is operationally focused and appears to be used for manual or semi-manual data imports.

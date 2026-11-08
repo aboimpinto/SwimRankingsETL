@@ -37,7 +37,10 @@ def name_key(row):
 
 
 def identity_key(row):
-    return digest([*name_key(row), row.get('club')])
+    fields = [*name_key(row), row.get('club')]
+    if row.get('birth_year_suffix') is not None:
+        fields.append(['birth_year_suffix', row['birth_year_suffix']])
+    return digest(fields)
 
 
 def race_key(row, swimmer_key):
@@ -67,14 +70,31 @@ def build_plan(conn, report, identities=None, days=None):
     with conn.cursor() as cur:
         cur.execute('SELECT id,swimmer_id,first_name,last_name,birth_year,gender,country_code,club_id FROM swimmers')
         swimmers = dicts(cur)
-        by_name, by_id = defaultdict(list), {}
+        by_name, by_id, by_suffix = defaultdict(list), {}, defaultdict(list)
         for swimmer in swimmers:
             by_name[name_key(swimmer)].append(swimmer)
             by_id[swimmer['id']] = swimmer
+            if swimmer['birth_year'] is not None:
+                by_suffix[(normalized(swimmer['first_name']), normalized(swimmer['last_name']), swimmer['gender'], swimmer['birth_year'] % 100)].append(swimmer)
         cur.execute('SELECT source_country_code,source_swimmer_id,swimmer_pk FROM swimmer_aliases')
         aliases = {(a,b):c for a,b,c in cur.fetchall()}
-        cur.execute('SELECT * FROM meets WHERE meet_id=%s', (meet_key(meet),))
+        # Names/dates are not unique: separate organisers can publish the same
+        # title on the same day. Keep historical keys, with a live-ID fallback.
+        resolved_meet_key = 'LIVE::' + str(meet['live_id'])
+        cur.execute('SELECT * FROM meets WHERE meet_id=%s', (resolved_meet_key,))
         matches = dicts(cur)
+        if not matches:
+            resolved_meet_key = meet_key(meet)
+            cur.execute('SELECT * FROM meets WHERE meet_id=%s', (resolved_meet_key,))
+            matches = dicts(cur)
+            if matches and any(
+                (m.get('city') and meet.get('city') and
+                 str(m['city']).strip().casefold() != str(meet['city']).strip().casefold())
+                or m['country_code'] != meet['country'] or m['pool_length'] != meet['pool_length']
+                for m in matches
+            ):
+                resolved_meet_key = 'LIVE::' + str(meet['live_id'])
+                matches = []
         if len(matches) > 1:
             raise ValueError('Ambiguous canonical meet identity')
         existing_meet = matches[0] if matches else None
@@ -110,7 +130,23 @@ def build_plan(conn, report, identities=None, days=None):
         current_events.add((event['number'],event['date'],event['round']))
         candidates = by_name[name_key(row)]
         override = identities.get(identity_key(row))
-        if override is not None:
+        if row['source_kind'] == 'pdf' and row.get('birth_year_suffix') is not None:
+            suffix = row['birth_year_suffix']
+            if type(suffix) is not int or not 0 <= suffix <= 99 or row['birth_year'] is not None:
+                raise ValueError('Invalid unresolved PDF birth-year suffix')
+            candidates = by_suffix[(normalized(row['first_name']), normalized(row['last_name']), row['gender'], suffix)]
+            if override is not None:
+                candidates = [s for s in candidates if s['id'] == int(override)]
+                if not candidates:
+                    raise ValueError('Reviewed PDF identity does not match name, birth-year suffix and gender')
+            if len(candidates) != 1:
+                holds.append({'reason': 'ambiguous_identity' if candidates else 'unknown_identity',
+                    'identity_key': identity_key(row), 'birth_year_suffix': suffix,
+                    'candidate_ids': [s['id'] for s in candidates]})
+                continue
+            # A copied normalized row preserves the raw PDF report and its digest.
+            row = dict(row, birth_year=candidates[0]['birth_year'])
+        elif override is not None:
             candidate = by_id.get(int(override))
             if candidate is None or name_key(candidate) != name_key(row):
                 raise ValueError('Reviewed identity does not match name, birth year and gender')
@@ -141,6 +177,16 @@ def build_plan(conn, report, identities=None, days=None):
         previous = ledger_index.get(key)
         event_id = event_index.get((event['distance'],event['stroke'],event['gender'],event['pool_length']))
         possibilities = existing_results.get((swimmer['id'],event_id),[]) if swimmer else []
+        # A previous parser stored unspecified individual event gender as U.
+        # Refine only a ledger-bound LENEX race
+        # whose normalized payload differs solely in this gender field.
+        if previous and swimmer and not possibilities and row['source_kind'] == 'lenex' and not event['is_relay']:
+            prior = previous['source_payload']
+            if (previous['source_kind'] == 'lenex' and prior['event']['gender'] == 'U'
+                    and event['gender'] == swimmer['gender'] and event['gender'] in ('M', 'F')
+                    and payload(dict(prior, event=dict(prior['event'], gender=event['gender']))) == payload(row)):
+                legacy_event_id = event_index.get((event['distance'],event['stroke'],'U',event['pool_length']))
+                possibilities = existing_results.get((swimmer['id'],legacy_event_id),[])
         possibilities = [r for r in possibilities if str(r['result_date']) == event['date'] and
                          bool(r['is_relay']) == event['is_relay'] and (r['event_round'] or 'TIM') == event['round']]
         if previous:
@@ -157,7 +203,9 @@ def build_plan(conn, report, identities=None, days=None):
             not previous or previous['source_kind'] == 'lenex' or old['reaction_time'] or old['has_splits'])
         if old and not previous and old['id'] in ledger_by_result and ledger_by_result[old['id']]['race_key'] != key:
             holds.append({'reason':'event_number_or_identity_changed','race_key':key}); continue
-        action = 'protected' if protected else 'unchanged' if previous and previous['payload_hash'] == digest(payload(row)) else 'update' if old else 'insert'
+        same_payload = previous and previous['payload_hash'] == digest(payload(row))
+        provenance_changed = same_payload and row['source_kind'] == 'lenex' and previous['source_hash'] != row['source_hash']
+        action = 'protected' if protected else 'provenance' if provenance_changed else 'unchanged' if same_payload else 'update' if old else 'insert'
         entries.append(dict(race_key=key, swimmer_id=swimmer['id'] if swimmer else None, swimmer_key=swimmer_key,
                             result_id=old['id'] if old else None, action=action, row=row,
                             before=old, previous=previous))
@@ -167,6 +215,7 @@ def build_plan(conn, report, identities=None, days=None):
     if removed:
         holds.append({'reason':'previously_imported_races_missing','race_keys':removed})
     plan = dict(meet=meet, canonical_meet_id=existing_meet['id'] if existing_meet else None,
+                canonical_meet_key=resolved_meet_key,
                 selected_days=sorted(days), entries=entries, holds=holds, excluded=report['excluded'],
                 source_digest=digest(report), counts=dict(Counter(e['action'] for e in entries)), recheck_required=True)
     plan = json.loads(json.dumps(plan, default=str))
@@ -196,7 +245,7 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
         cur.execute(LEDGER); cur.execute(AUDIT)
         cur.execute('ALTER TABLE results ADD COLUMN IF NOT EXISTS club_name text, ADD COLUMN IF NOT EXISTS club_source text')
         ensure_country(cur,meet['country'])
-        meet_id = ensure_meet(cur,meet_key(meet),meet['name'],meet['city'],meet['country'],meet['start_date'],meet['pool_length'])
+        meet_id = ensure_meet(cur,plan['canonical_meet_key'],meet['name'],meet['city'],meet['country'],meet['start_date'],meet['pool_length'])
         cur.execute('UPDATE meets SET end_date=GREATEST(end_date,%s::date) WHERE id=%s',(meet['end_date'],meet_id))
         new_swimmers = {}
         for entry in plan['entries']:
@@ -204,6 +253,13 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
             if action in ('protected','unchanged'):
                 continue
             row, event = entry['row'],entry['row']['event']
+            if action == 'provenance':
+                # The latest complete file still attests this unchanged race.
+                # Preserve result/split IDs and timing; update only its provenance.
+                cur.execute('UPDATE results SET club_source=%s WHERE id=%s', (row['source_hash'],entry['result_id']))
+                cur.execute('UPDATE live_result_imports SET source_url=%s,source_hash=%s,source_payload=%s::jsonb,imported_at=now() WHERE live_id=%s AND race_key=%s',
+                            (row['source'],row['source_hash'],json.dumps(row),meet['live_id'],entry['race_key']))
+                continue
             swimmer_id = entry['swimmer_id'] or new_swimmers.get(entry['swimmer_key'])
             if swimmer_id is None:
                 ensure_country(cur,row['nation'])
