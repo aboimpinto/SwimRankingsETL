@@ -1,5 +1,7 @@
 # MemoryBank
 
+Raw source policy: [local retention / AWS cleanup](../docs/source-file-retention.md). Keep local replay files; AWS raw inputs are temporary.
+
 Completed experiment: [one-hour trial results](../docs/nrt-hour-trial-results-2026-11-08.md),
 14:41:54–15:41:54 UTC. Eleven cycles executed, one recovery slot skipped; all
 executed cycles under five minutes. 108 new results published, local 58 / AWS 53,

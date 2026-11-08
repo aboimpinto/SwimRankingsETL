@@ -1,5 +1,7 @@
 # Near real time swimming results
 
+Raw source policy: [local retention / AWS cleanup](source-file-retention.md). Keep local replay files; AWS raw inputs are temporary.
+
 Latest outcome: [completed one-hour five-minute-cadence trial](nrt-hour-trial-results-2026-11-08.md).
 108 new results published at local 58 / AWS 53; 11 cycles under five minutes,
 one skipped recovery slot and one reader-latency incident. Source coverage is
