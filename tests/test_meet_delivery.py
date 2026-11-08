@@ -140,6 +140,24 @@ class Validation(unittest.TestCase):
                 self.assertEqual(d.push(args)["packages"], 1)
                 run.assert_not_called()
 
+    def test_owned_ssh_socket_is_used_for_both_transports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args = SimpleNamespace(directory=folder, ssh_host="aws-swimming", remote_dir="/srv/delivery",
+                remote_config="/srv/private/db.json", expect_host="localhost", expect_database="swimrankings",
+                commit=True, ssh_control_path="/tmp/nrt-test/control")
+            def run(argv, **kwargs):
+                return SimpleNamespace(stdout="[]" if " status " in argv[-1] else "")
+            with patch.object(d.subprocess, "run", side_effect=run) as calls:
+                self.assertEqual(d.push(args)["uploaded"], 0)
+                self.assertTrue(any(c.args[0][0] == "scp" for c in calls.call_args_list))
+                for call in calls.call_args_list:
+                    self.assertIn("ControlPath=/tmp/nrt-test/control", call.args[0])
+                    self.assertIn("ControlMaster=no", call.args[0])
+            args.ssh_control_path = "relative/socket"
+            with patch.object(d.subprocess, "run") as run:
+                with self.assertRaises(ValueError): d.push(args)
+                run.assert_not_called()
+
     def test_export_is_idempotent_and_chains_revisions(self):
         p = packet()["payload"]
         with tempfile.TemporaryDirectory() as folder, patch.object(

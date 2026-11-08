@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/nrt_*.py'
       - 'scripts/nrt_*.ts'
+      - 'scripts/nrt_*.mjs'
       - 'scripts/french_splash_pdf.py'
       - 'scripts/italian_splash_pdf.py'
       - 'scripts/english_splash_pdf.py'
@@ -12,6 +13,7 @@ on:
       - 'scripts/import_live_swimrankings_meet.py'
       - 'scripts/migrate_add_live_result_batches.sql'
       - 'tests/test_nrt*.py'
+      - 'tests/test_nrt*.mjs'
       - 'tests/test_live*.py'
       - 'tests/test_*pdf*.py'
       - 'tests/fixtures/**'
@@ -23,6 +25,7 @@ on:
     paths:
       - 'scripts/nrt_*.py'
       - 'scripts/nrt_*.ts'
+      - 'scripts/nrt_*.mjs'
       - 'scripts/french_splash_pdf.py'
       - 'scripts/italian_splash_pdf.py'
       - 'scripts/english_splash_pdf.py'
@@ -31,6 +34,7 @@ on:
       - 'scripts/import_live_swimrankings_meet.py'
       - 'scripts/migrate_add_live_result_batches.sql'
       - 'tests/test_nrt*.py'
+      - 'tests/test_nrt*.mjs'
       - 'tests/test_live*.py'
       - 'tests/test_*pdf*.py'
       - 'tests/fixtures/**'
@@ -58,6 +62,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/test_nrt_concurrency.mjs
       - run: python -m pip install -r requirements-delivery.txt
       - name: Configure disposable database
         run: |

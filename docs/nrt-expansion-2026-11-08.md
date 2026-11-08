@@ -82,3 +82,13 @@ worktree's `reports/nrt-expansion-2026-11-08/` and `reports/nrt-milestone1/state
 Private delivery receipts, per-stage timings, host metrics and before/during/after
 reader logs are under the canonical ETL expansion report directory. Do not commit
 PDFs, swimmer rows, credentials or private deployment configuration.
+
+## Five-meet result and owner-directed next step
+
+The combined run finished in **189.848 seconds**, accepted 121 new results and
+published local 49 / AWS 44. All 284 stored facts/bests/ranking checks and 445
+monitored requests passed; maximum request 1.499 seconds. Fourteen identity rows
+and two documents remain held. Pending delivery is empty for accepted work.
+Expansion stopped because the complete timer exceeded 180 seconds. The owner
+chose optimization followed by another changed five-meet test. See the
+[query evidence, bounded workers and transport changes](nrt-five-meet-optimization.md).

@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 from nrt_io import atomic_json, read
+from nrt_verifier_bundle import verifier_source
 
 
 def publication_receipt(context, job):
@@ -66,7 +67,7 @@ def main():
         # implementation in this repository rather than an ignored dated folder.
         script = checkout / 'artifacts' / 'nrt-batches' / context['batchId'] / 'verify.ts'
         script.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        code = Path(__file__).with_name('nrt_swimprofiles_verify.ts').read_text()
+        code = verifier_source()
         # artifact directory is three levels below the app root.
         script.write_text(code.replace('../../scripts/', '../../../scripts/')); script.chmod(0o600)
         env = os.environ.copy(); env.update(LIVE_VERIFY_MEETS=json.dumps([{'id': i} for i in context['meetIds']]),

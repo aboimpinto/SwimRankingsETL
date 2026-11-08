@@ -2,6 +2,7 @@ import '../../scripts/env';
 import {required} from '../../scripts/env';
 import {Pool} from 'pg';
 import assert from 'node:assert/strict';
+import {mapLimit} from './nrt_verify_concurrency.mjs';
 import {writeFile} from 'node:fs/promises';
 import {referenceBestsSql} from '../../scripts/fixtures/incremental-import';
 const source=new Pool({connectionString:required('SWIMRANKINGS_DATABASE_URL'),max:1,options:'-c default_transaction_read_only=on -c statement_timeout=30000'});
@@ -42,7 +43,7 @@ try{
  for(const id of [...new Set<string>(meetSaved.map(r=>r.athlete_id))].slice(0,25)) rankingCandidates.add(id);
  }
  const athletes=[...new Set(saved.map(r=>r.athlete_id))];
- const expected=referenceBestsSql.replace('WHERE a.active','WHERE r.athlete_id=ANY($1::uuid[]) AND a.active');
+ const expected=referenceBestsSql.replace('FROM swimmer_result r JOIN','FROM unnest($1::uuid[]) ids(id) CROSS JOIN LATERAL (SELECT * FROM swimmer_result rr WHERE rr.athlete_id=ids.id AND rr.active OFFSET 0) r JOIN');
  const differences=(await target.query(`WITH expected AS (${expected}), actual AS (SELECT * FROM swimmer_best WHERE athlete_id=ANY($1::uuid[])) SELECT count(*)::int n FROM ((SELECT * FROM actual EXCEPT SELECT * FROM expected) UNION ALL (SELECT * FROM expected EXCEPT SELECT * FROM actual)) d`,[athletes])).rows[0].n;
  assert.equal(differences,0);
  const publication=(await target.query('SELECT generation::text FROM swimmer_publication WHERE singleton')).rows[0].generation;
@@ -54,7 +55,7 @@ try{
  }
  const groups=(await target.query(`WITH choices AS (SELECT DISTINCT group_key,scope FROM jsonb_to_recordset($1::jsonb) AS x(group_key text,scope text)), ranked AS (SELECT *,row_number() OVER(PARTITION BY scope ORDER BY group_key) n FROM choices) SELECT group_key,scope FROM ranked WHERE n<=8 ORDER BY scope,group_key`,[JSON.stringify(choices)])).rows;
  let checked=0,ownChecked=0;
- for(const {group_key} of groups){
+ await mapLimit(groups,2,async ({group_key})=>{
   const rows=(await target.query('SELECT athlete_id,time_hundredths,rank() OVER(ORDER BY time_hundredths)::int position FROM swimmer_ranking_entry WHERE group_key=$1 ORDER BY time_hundredths,athlete_id',[group_key])).rows;
   const own=rows.find(r=>athletes.includes(r.athlete_id));assert(own);
   const params=new URLSearchParams({group:group_key,athlete:own.athlete_id});
@@ -63,12 +64,12 @@ try{
   assert.equal(data.swimmer.athlete_id,own.athlete_id);assert.equal(Number(data.swimmer.rank),own.position);assert.equal(Number(data.swimmer.time_hundredths),Number(own.time_hundredths));ownChecked++;
   const top=rows.filter(r=>r.position<=10).slice(0,50);assert.equal(data.entries.length,top.length);
   top.forEach((r,i)=>{assert.equal(data.entries[i].athlete_id,r.athlete_id);assert.equal(Number(data.entries[i].rank),r.position);checked++});
- }
+ });
  const profileIds=athletes.slice(0,10);
  const profiles=(await target.query('SELECT id,slug FROM directory_entity WHERE id=ANY($1::uuid[]) AND active AND kind=\'swimmer\'',[profileIds])).rows;
  assert.equal(profiles.length,profileIds.length);
  let affectedProfileRequests=0;
- for(const profile of profiles){
+ await mapLimit(profiles,2,async (profile)=>{
   const season=new Date().getUTCFullYear()+(new Date().getUTCMonth()>=8?1:0);
   for(const path of [`/swimmers/${profile.slug}`,`/api/swimmers/${profile.id}`,`/api/swimmers/${profile.id}?season=${season}`,`/api/swimmers/${profile.id}/results`]){
    const begin=performance.now();const response=await fetch((process.env.LIVE_VERIFY_ORIGIN??'http://127.0.0.1:4340')+path,{cache:'no-store',signal:AbortSignal.timeout(15000)});const body=await response.text();
@@ -77,7 +78,7 @@ try{
    else {const data=JSON.parse(body);if(path.endsWith('/results'))assert(Array.isArray(data.results));else{assert.equal(data.profile.id,profile.id);assert.equal(String(data.publication),String(publication));assert(Array.isArray(data.profile.bests));assert(Array.isArray(data.rankings));}}
    affectedProfileRequests++;
   }
- }
- const report={status:'passed',affectedProfiles:profiles.length,affectedProfileRequests,publication,sourceMeetIds:meets.map((m:any)=>m.id),facts:factCount,splits:splitCount,reactions:reactionCount,verifiedRaceDetails:true,athletes:athletes.length,rankingCandidateAthletes:candidates.length,bestDifferences:differences,groups:groups.length,scopes:[...new Set(groups.map(g=>g.scope))],checked,ownChecked,mismatches:0,queryTimings,apiTimings,ms:Math.round(performance.now()-started)};
+ });
+ const report={verificationConcurrency:2,status:'passed',affectedProfiles:profiles.length,affectedProfileRequests,publication,sourceMeetIds:meets.map((m:any)=>m.id),facts:factCount,splits:splitCount,reactions:reactionCount,verifiedRaceDetails:true,athletes:athletes.length,rankingCandidateAthletes:candidates.length,bestDifferences:differences,groups:groups.length,scopes:[...new Set(groups.map(g=>g.scope))],checked,ownChecked,mismatches:0,queryTimings,apiTimings,ms:Math.round(performance.now()-started)};
  console.log(JSON.stringify(report));
 }catch(error){console.error(JSON.stringify({status:'failed',queryTimings,apiTimings,ms:Math.round(performance.now()-started)}));throw error;}finally{await source.end();await target.end();}
