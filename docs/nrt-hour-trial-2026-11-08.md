@@ -72,3 +72,27 @@ coverage gaps, skipped starts, disk growth and the explicit end of the timer.
 
 The completed outcome is pending while the trial runs. Do not infer success from
 a live process, an unchanged source or an unfinished `trial.json`.
+
+## Response-time incident during cycle 5
+
+Cycle 5 published 48 new results at local 55 / AWS 50 in 235.676 seconds. One
+random AWS profile page returned valid HTTP 200 content in 2,382 ms. This was a
+response-time violation, not a missing profile or failed SQL response. The other
+requests passed functional checks. The monitor retained the violation and the
+timer stopped new starts; both delivery queues were already clear.
+
+A repeat of the same three-profile sample passed (14 requests, maximum 1,520 ms),
+and a fresh sample passed (15 requests, maximum 258 ms). Application container
+logs for the incident interval were empty. The exact responsible SQL statement
+is therefore not established; successful warm rechecks do not prove a root-cause
+fix. Private evidence: canonical ETL
+`reports/nrt-expansion-2026-11-08/hour-reader-incident-05/`.
+
+The bounded trial resumed only after these checks, retaining the original start,
+end, limits and failed cycle. Slot 6 was skipped, rather than starting overlapping
+catch-up work. `--resume-after-checks` requires two positive reader receipts and
+rejects attempts to change the cadence/duration/threshold. The final trial status
+must distinguish completion with incidents from an entirely passing run. The
+application and import algorithms were unchanged; only finite-timer recovery was
+added, with a regression check preserving the original failure. No claim is made
+that the transient latency cause has been fixed.
