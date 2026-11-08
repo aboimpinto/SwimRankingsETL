@@ -1,6 +1,14 @@
 # Active Context
 
-## Latest implementation checkpoint — 8 November 2026
+## Current checkpoint — after the completed 8 November trial
+
+See [trial results](../docs/nrt-hour-trial-results-2026-11-08.md): local 58 / AWS 53,
+108 new results, queues clear, timer exited. [Raw-source retention](../docs/source-file-retention.md)
+is documented and AWS records cleanup installed. [Weekend preparation](../docs/nrt-unattended-weekend-plan.md)
+now targets a local unattended runner while the owner is away. No new schedule
+or Codex investigator has been enabled. The initial milestone below is history.
+
+## Historical initial implementation checkpoint — 8 November 2026
 
 The [NRT milestone](../docs/nrt-implementation-milestone-1.md) supersedes older
 statements below about missing documentation/tests. A reusable manual multi-meet

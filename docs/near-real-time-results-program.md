@@ -1,5 +1,7 @@
 # Near real time swimming results
 
+Next preparation: [first unattended weekend plan](nrt-unattended-weekend-plan.md). Owner confirmed the local computer remains on; five-minute scheduling, recovery and alerts are planned, not installed.
+
 Raw source policy: [local retention / AWS cleanup](source-file-retention.md). Keep local replay files; AWS raw inputs are temporary.
 
 Latest outcome: [completed one-hour five-minute-cadence trial](nrt-hour-trial-results-2026-11-08.md).
