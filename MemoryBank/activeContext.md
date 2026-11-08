@@ -1,5 +1,7 @@
 # Active Context
 
+**Resume here:** [8 November unattended-weekend handoff](handoff-nrt-unattended-weekend-2026-11-08.md). Canonical documentation is on `main` in this checkout; private trial evidence is archived here. No new schedule is enabled.
+
 ## Current repository state
 
 This checkout is a small, script-only ETL repository with no root documentation, no tests, and no packaging metadata. The code is operationally focused and appears to be used for manual or semi-manual data imports.

@@ -1,5 +1,7 @@
 # MemoryBank
 
+**Resume here:** [8 November unattended-weekend handoff](handoff-nrt-unattended-weekend-2026-11-08.md). Canonical documentation is on `main` in this checkout; private trial evidence is archived here. No new schedule is enabled.
+
 This folder captures durable context for `SwimRankingsETL`.
 
 Start with the [project overview](../README.md) and [desktop-to-AWS delivery runbook](../docs/desktop-incremental-delivery.md). They describe localServer imports, incremental AWS delivery and required refresh acknowledgements from SophiaWalker, Colin and LimmatSharks. Older individual notes may describe earlier repository snapshots.
