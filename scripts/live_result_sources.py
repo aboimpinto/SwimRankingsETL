@@ -89,19 +89,70 @@ def date_range(text):
     return start, end
 
 
+class ModernIndexParser(HTMLParser):
+    """Read the responsive index without duplicating mobile dates/locations."""
+    def __init__(self):
+        super().__init__()
+        self.rows, self.stack, self.cells = [], [], {}
+        self.href, self.cell = None, None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        classes = set(attrs.get('class', '').split())
+        if tag == 'tr':
+            self.cells, self.href = {}, None
+        if tag == 'td':
+            self.cell = next((c for c in classes if c in
+                              {'tdDate', 'tdCourse', 'tdName', 'tdCity'}), None)
+            if self.cell:
+                self.cells[self.cell] = []
+        if tag == 'a' and re.fullmatch(r'/\d+/?', attrs.get('href', '')):
+            self.href = attrs['href']
+        if tag not in {'br','img','input','meta','link','hr','wbr'}:
+            self.stack.append((tag, classes))
+
+    def handle_data(self, text):
+        if self.cell and not any(classes & {'dateShort', 'meta', 'flag'}
+                                 for _, classes in self.stack):
+            self.cells[self.cell].append(text)
+
+    def handle_endtag(self, tag):
+        if tag == 'td':
+            self.cell = None
+        if tag == 'tr' and self.href and len(self.cells) == 4:
+            cells = {k:' '.join(' '.join(v).split()) for k,v in self.cells.items()}
+            location = re.fullmatch(r'(.*?)\s+([A-Z]{3})', cells['tdCity'])
+            if location:
+                self.rows.append((self.href, cells['tdDate'], cells['tdCourse'],
+                                  f'{location[1]} ({location[2]})', cells['tdName']))
+        for i in range(len(self.stack)-1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                break
+
+
 def discover(html=None):
+    html = download(INDEX).decode('utf-8') if html is None else html
     parser = IndexParser()
-    parser.feed((download(INDEX).decode('utf-8') if html is None else html))
-    meets = []
-    for href, dates, course, location, name in parser.rows:
+    parser.feed(html)
+    modern = ModernIndexParser()
+    modern.feed(html)
+    meets = {}
+    for href, dates, course, location, name in parser.rows + modern.rows:
         start, end = date_range(dates)
         match = re.fullmatch(r'(.*?)\s*\(([A-Z]{3})\)', location)
         if not match or course not in ('25m', '50m'):
             continue
-        meets.append(dict(live_id=href.strip('/'), url=urljoin(INDEX, href), name=name,
+        meet = dict(live_id=href.strip('/'), url=urljoin(INDEX, href), name=name,
                           start_date=str(start), end_date=str(end), city=match[1],
-                          country=match[2], pool_length=int(course[:2])))
-    return meets
+                          country=match[2], pool_length=int(course[:2]))
+        previous = meets.get(meet['live_id'])
+        if previous and previous != meet:
+            raise ValueError('Conflicting live-index records for ' + meet['live_id'])
+        meets[meet['live_id']] = meet
+    if not parser.rows and not modern.rows and re.search(r'href=[\"\']/\d+/', html):
+        raise ValueError('Unrecognized live-index layout; refusing empty discovery')
+    return list(meets.values())
 
 
 class LinkParser(HTMLParser):
@@ -169,6 +220,17 @@ PDF_HEADER = re.compile(r'Wettkampf\s+(\d+)\s+(Herren|Knaben|Damen|Mädchen),\s+
 PDF_ROW = re.compile(r'^\s*(?P<rank>\d+\.|disq\.|DNS|DNF|DSQ|n\.a\.|abg\.)\s+(?P<name>.+?,.+?)\s+(?P<year>\d{4})\s+(?:(?P<time>(?:\d+:)?\d{1,2}\.\d{2})\s+)?(?:(?P<points>\d+)\s+)?(?P<club>[A-Z][A-Z0-9_-]*)\s*$', re.I)
 
 
+# Splash's full-club layout places club before time and can abbreviate birth year.
+# Keep the suffix explicit; the importer must resolve its century from a unique
+# existing canonical identity rather than inventing a birth year.
+PDF_FULL_CLUB_ROW = re.compile(
+    r'^\s*(?P<rank>\d+\.|disq\.|DNS|DNF|DSQ|n\.a\.|abg\.)\s+'
+    r'(?P<name>.+?,.+?)\s+(?P<year>\d{2}|\d{4})\s+'
+    r'(?P<club>\S+(?:[ \t]\S+)*)\s{2,}(?P<time>(?:\d+:)?\d{1,2}\.\d{2})'
+    r'(?:\s+(?P<points>\d+))?'
+    r'(?:\s+(?:\d+:)?\d{1,2}\.\d{2})*\s*$', re.I)
+
+
 def pdf_text(data):
     if not data.startswith(b'%PDF'):
         raise ValueError('Download is not a PDF')
@@ -184,7 +246,9 @@ def parse_pdf(text, meet, source, source_hash, schedule=None):
     if re.search(r'Wettkampf\s+\d+\s+.*?\d+\s*x\s*\d+m', text):
         return {'rows': [], 'holds': [], 'excluded': ['relay PDF: no verified athlete birth years/identities']}
     header = PDF_HEADER.search(text)
-    if not header or 'Rangliste' not in text or not re.search(r'Rang\s+Jg\.\s+Zeit\s+Pkt\.\s+CLUB', text):
+    legacy_layout = bool(re.search(r'Rang\s+Jg\.\s+Zeit\s+Pkt\.\s+CLUB', text))
+    full_club_layout = bool(re.search(r'Rang\s+Jg\.\s+Zeit\s+Pkt\.', text)) and not legacy_layout
+    if not header or 'Rangliste' not in text or not (legacy_layout or full_club_layout):
         return {'rows': [], 'holds': ['Unsupported PDF layout (expected German Splash individual results)'], 'excluded': []}
     if normalized(meet['name']) not in normalized(text[:500]):
         return {'rows': [], 'holds': ['PDF meet name does not match discovered competition'], 'excluded': []}
@@ -212,26 +276,30 @@ def parse_pdf(text, meet, source, source_hash, schedule=None):
         stripped = line.strip()
         if re.fullmatch(r'Jahrg[aä]nge?\s+.+', stripped):
             age_label = stripped
-        match = PDF_ROW.match(line)
+        match = (PDF_ROW if legacy_layout else PDF_FULL_CLUB_ROW).match(line)
         if match:
             item = match.groupdict()
             if not item['time']:
                 excluded.append('Non-finish without recorded time: ' + stripped)
                 continue
             last, first = [v.strip() for v in item['name'].split(',', 1)]
-            key = (normalized(first), normalized(last), int(item['year']))
+            short_year = len(item['year']) == 2
+            birth_year = None if short_year else int(item['year'])
+            key = (normalized(first), normalized(last), item['year'])
             if key in identities:
                 holds.append('Repeated swimmer in PDF event: ' + item['name'])
                 continue
             identities.add(key)
             status = None if item['rank'][0].isdigit() else 'DSQ' if item['rank'].lower() in ('disq.', 'dsq') else item['rank'].upper()
-            rows.append(dict(event=event.copy(), first_name=first, last_name=last, birth_year=int(item['year']),
+            rows.append(dict(event=event.copy(), first_name=first, last_name=last, birth_year=birth_year,
                              gender=event['gender'], nation=None, athlete_id=None, club=item['club'],
                              time_seconds=str(Decimal(item['time']) if ':' not in item['time'] else time_to_seconds(item['time'])),
-                             points_fina=int(item['points']) if item['points'] and 'Punkte: FINA' in text else None,
+                             points_fina=int(item['points']) if item['points'] and re.search(r'Punkte:\s*(?:FINA|AQUA)\b', text) else None,
                              rank=None, age_group_rank=int(item['rank'][:-1]) if status is None else None,
                              age_group_label=age_label, status=status, heat=None, lane=None, reaction_time=None,
                              splits=[], source_kind='pdf', source=source, source_hash=source_hash))
+            if short_year:
+                rows[-1]['birth_year_suffix'] = int(item['year'])
         elif re.match(r'^\s*(?:\d+\.|disq\.|DNS\b|DNF\b|DSQ\b|n\.a\.|abg\.)\s+', line, re.I):
             if normalized(meet['name']) != normalized(stripped):
                 holds.append('Unparsed result-like line: ' + stripped)
@@ -247,9 +315,12 @@ def lenex_schedule(root, meet):
             style = event.find('SWIMSTYLE')
             if style is None:
                 continue
+            distance = parse_int(style.get('distance'))
+            if not distance or distance < 0 or style.get('stroke') not in {'FREE','BACK','BREAST','FLY','MEDLEY'}:
+                continue
             count = parse_int(style.get('relaycount')) or 1
             events[event.get('eventid')] = dict(number=event.get('number'), gender=event.get('gender') or 'U',
-                distance=int(style.get('distance')), stroke=style.get('stroke'), date=session.get('date'),
+                distance=distance, stroke=style.get('stroke'), date=session.get('date'),
                 round=event.get('round'), pool_length=meet['pool_length'], is_relay=count > 1,
                 relay_count=count if count > 1 else None)
     return events
@@ -265,6 +336,9 @@ def parse_lenex(data, meet, source):
     ranks = build_age_group_rankings(root)
     default_groups = build_event_age_groups(root)
     rows, holds, excluded = [], [], []
+    for event in root.findall('.//SESSION/EVENTS/EVENT'):
+        if event.get('eventid') not in events:
+            holds.append('Unsupported LENEX event definition: ' + str(event.get('eventid')))
     athletes = {}
     source_hash = sha(data)
     for club in root.findall('.//CLUB'):
@@ -285,6 +359,11 @@ def parse_lenex(data, meet, source):
         if not event['date'] or not meet['start_date'] <= event['date'] <= meet['end_date'] or not event['number'] or not event['round']:
             holds.append('Incomplete or out-of-range event identity')
             return
+        # Combined individual events may omit gender (for example RZO 800m).
+        # Rank each individual performance using its athlete's declared gender;
+        # relay event gender belongs to the team and must remain unchanged.
+        if not event['is_relay'] and event['gender'] == 'U' and a.get('gender') in ('M', 'F'):
+            event = dict(event, gender=a.get('gender'))
         group = ranks.get((result.get('eventid'), result.get('resultid'))) or default_groups.get(result.get('eventid'))
         points = result.get('points')
         rows.append(dict(event=event.copy(), first_name=a.get('firstname'), last_name=a.get('lastname'),

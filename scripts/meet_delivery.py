@@ -715,9 +715,16 @@ def push(args):
     ):
         raise ValueError("Use an absolute remote directory without spaces/traversal")
 
+    control_path = getattr(args, "ssh_control_path", None)
+    transport_options = []
+    if control_path:
+        if not Path(control_path).is_absolute() or len(str(control_path).encode()) > 100:
+            raise ValueError("SSH control socket requires a short absolute path")
+        transport_options = ["-o", f"ControlPath={control_path}", "-o", "ControlMaster=no"]
+
     def ssh(argv):
         return subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", args.ssh_host, shlex.join(argv)],
+            ["ssh", "-o", "BatchMode=yes", *transport_options, args.ssh_host, shlex.join(argv)],
             check=True,
             stdout=subprocess.PIPE,
             text=True,
@@ -725,7 +732,7 @@ def push(args):
 
     def scp(path, destination):
         subprocess.run(
-            ["scp", "-q", str(path), f"{args.ssh_host}:{destination}"], check=True
+            ["scp", "-q", *transport_options, str(path), f"{args.ssh_host}:{destination}"], check=True
         )
 
     packages = [
@@ -894,6 +901,7 @@ def main():
         default="python3",
         help="Destination Python executable, e.g. a virtual environment path",
     )
+    cmd.add_argument("--ssh-control-path", help="Reuse an operator-owned SSH control socket; does not start a persistent service")
     args = parser.parse_args()
     try:
         if args.action == "push":

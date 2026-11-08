@@ -12,6 +12,7 @@ fi
 : "${ETL_ROOT:?Set the installed SwimRankingsETL directory}"
 : "${RECORD_DB_CONFIG:?Set the private source writer configuration path}"
 : "${RECORD_STATE_DIR:?Set the writable state directory}"
+remove_imported_sources=false
 preview=false
 discovery_only=false
 skip_continental=false
@@ -19,6 +20,7 @@ input_directory=
 source_args=()
 while (($#)); do
   case "$1" in
+    --remove-imported-source-files) remove_imported_sources=true; shift ;;
     --skip-continental) skip_continental=true; shift ;;
     --input-directory) input_directory=${2:?Missing input directory}; source_args+=("$1" "$2"); shift 2 ;;
     --input-directory=*) input_directory=${1#*=}; source_args+=("$1"); shift ;;
@@ -94,3 +96,45 @@ tmp.replace(latest)
 print(json.dumps(result))
 PY
 [[ $source_status == 0 && $continental_status == 0 && $consumer_status == 0 && $audit_status == 0 ]]
+
+# Local entry point retains raw files; the AWS entry point opts into cleanup.
+# Never clean failed/dry-run inputs. Transfer copies must match imported bytes.
+if "$remove_imported_sources" && ! "$preview"; then
+  "${RECORD_PYTHON:-python3}" - "$run_dir" "$input_directory" <<'PY_CLEANUP'
+import hashlib, json, sys
+from pathlib import Path
+run = Path(sys.argv[1])
+files = run / 'files'
+receipt = run / 'source-cleanup.json'
+items = []
+if files.is_dir() and not files.is_symlink():
+    for path in sorted(files.iterdir()):
+        if path.is_file() and not path.is_symlink() and path.suffix.lower() in ('.lxf', '.pdf'):
+            items.append(dict(name=path.name, bytes=path.stat().st_size,
+                              sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
+# Delete only matching copies of files consumed by this successful run.
+transfer = Path(sys.argv[2]) if sys.argv[2] else None
+if transfer is not None:
+    if transfer.is_symlink():
+        raise RuntimeError('Refusing symlink transfer directory')
+    for item in items:
+        path = transfer / item['name']
+        if path.exists() or path.is_symlink():
+            if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
+                raise RuntimeError('Transfer differs from imported source: ' + item['name'])
+            item['transfer_copy'] = str(path)
+def save(status):
+    tmp = receipt.with_suffix('.part')
+    tmp.write_text(json.dumps(dict(status=status, files=items), indent=2) + '\n')
+    tmp.replace(receipt)
+save('pending')
+for item in items:
+    path = files / item['name']
+    if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != item['sha256']:
+        raise RuntimeError('Source changed before cleanup: ' + item['name'])
+    path.unlink()
+    if 'transfer_copy' in item:
+        Path(item['transfer_copy']).unlink()
+save('complete')
+PY_CLEANUP
+fi

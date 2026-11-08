@@ -1,6 +1,25 @@
 # MemoryBank
 
+**Resume here:** [8 November unattended-weekend handoff](handoff-nrt-unattended-weekend-2026-11-08.md). Paulo returns before Friday; no background imports are scheduled.
+
+Next preparation: [first unattended weekend plan](../docs/nrt-unattended-weekend-plan.md). Owner confirmed the local computer remains on; five-minute scheduling, recovery and alerts are planned, not installed.
+
+Raw source policy: [local retention / AWS cleanup](../docs/source-file-retention.md). Keep local replay files; AWS raw inputs are temporary.
+
+Completed experiment: [one-hour trial results](../docs/nrt-hour-trial-results-2026-11-08.md),
+14:41:54–15:41:54 UTC. Eleven cycles executed, one recovery slot skipped; all
+executed cycles under five minutes. 108 new results published, local 58 / AWS 53,
+queues clear. One valid response exceeded two seconds; full source coverage is
+still incomplete. The timer exited; no permanent cron/service is installed.
+
+Latest owner gate and expansion evidence: [8 November bounded expansion](../docs/nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
+
 This folder captures durable context for `SwimRankingsETL`.
+
+Historical checkpoint: [full-cohort small-delta trial](../docs/nrt-delta-cohort-2026-11-08.md).
+Four new results published local 51 / AWS 46 with passing checks. Processing took
+209.675 seconds plus a separate 39.794-second manual handoff; expansion stopped
+and direction was requested. All-source parsing/capacity remains unproven.
 
 Start with the [project overview](../README.md) and [desktop-to-AWS delivery runbook](../docs/desktop-incremental-delivery.md). They describe localServer imports, incremental AWS delivery and required refresh acknowledgements from SophiaWalker, Colin and LimmatSharks. Older individual notes may describe earlier repository snapshots.
 
@@ -32,3 +51,15 @@ Read the country-records runbook for source mapping, preview evidence and actual
 local/AWS publication state. No scheduler is to be configured.
 
 For each weekly records refresh, follow the [manual operator checklist](../docs/weekly-record-refresh.md). It documents the installed entry points, preview review, matching local/AWS delivery, receipt verification and retries; scheduling remains disabled.
+
+## Near-real-time implementation — 8 November 2026
+
+Start with the [program](../docs/near-real-time-results-program.md),
+[manual batch commands](../docs/nrt-manual-batches.md) and
+[milestone evidence](../docs/nrt-implementation-milestone-1.md).
+The collector, recoverable batch runner and SwimProfiles adapters are implemented
+on `feat/nrt-manual-batch`. The initial local trial accepted 77 new results at
+generation 46 and initially deferred AWS delivery. That historical deferral was
+subsequently reconciled; use the latest checkpoint above for current receipts.
+No unattended runner/container is installed. Historical context files below may
+predate the repository's tests and documented runtime.

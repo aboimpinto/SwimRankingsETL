@@ -179,9 +179,18 @@ PY
 ```
 
 Finish only when the checksum checks, source snapshot comparisons and both app
-publication receipts succeed. Keep the preview, local apply and AWS run folders;
+publication receipts succeed. Keep the local preview/apply files and AWS JSON/log receipts;
 record their paths with any discovery limitations for that week's handoff.
 An app UI release is separate from this data-only operation.
+
+## Raw source cleanup
+
+Follow the [source retention policy](source-file-retention.md). The AWS entry
+point now removes successfully imported raw run files and checksum-matching
+transfer copies. Keep the original local preview bundle for re-imports. Require
+`source-cleanup.json` to say `complete`, in addition to the publication receipt.
+Previews and failed runs keep temporary inputs for recovery. JSON receipts,
+continental bundles and logs are retained; no website media is removed.
 
 ## Failures, retries and next week
 

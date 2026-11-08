@@ -1,0 +1,87 @@
+name: NRT manual batch
+on:
+  pull_request:
+    paths:
+      - 'scripts/nrt_*.py'
+      - 'scripts/nrt_*.ts'
+      - 'scripts/nrt_*.mjs'
+      - 'scripts/french_splash_pdf.py'
+      - 'scripts/italian_splash_pdf.py'
+      - 'scripts/english_splash_pdf.py'
+      - 'scripts/slovak_splash_pdf.py'
+      - 'scripts/import_live_results.py'
+      - 'scripts/live_result_sources.py'
+      - 'scripts/import_live_swimrankings_meet.py'
+      - 'scripts/migrate_add_live_result_batches.sql'
+      - 'tests/test_nrt*.py'
+      - 'tests/test_nrt*.mjs'
+      - 'tests/test_live*.py'
+      - 'tests/test_*pdf*.py'
+      - 'tests/fixtures/**'
+      - 'config/nrt-local.example.json'
+      - 'requirements-delivery.txt'
+      - '.github/workflows/nrt-manual-batch.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/nrt_*.py'
+      - 'scripts/nrt_*.ts'
+      - 'scripts/nrt_*.mjs'
+      - 'scripts/french_splash_pdf.py'
+      - 'scripts/italian_splash_pdf.py'
+      - 'scripts/english_splash_pdf.py'
+      - 'scripts/slovak_splash_pdf.py'
+      - 'scripts/import_live_results.py'
+      - 'scripts/live_result_sources.py'
+      - 'scripts/import_live_swimrankings_meet.py'
+      - 'scripts/migrate_add_live_result_batches.sql'
+      - 'tests/test_nrt*.py'
+      - 'tests/test_nrt*.mjs'
+      - 'tests/test_live*.py'
+      - 'tests/test_*pdf*.py'
+      - 'tests/fixtures/**'
+      - 'config/nrt-local.example.json'
+      - 'requirements-delivery.txt'
+      - '.github/workflows/nrt-manual-batch.yml'
+permissions:
+  contents: read
+jobs:
+  canonical-and-adapter-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nrt_test
+          POSTGRES_PASSWORD: nrt_test
+          POSTGRES_DB: nrt_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/test_nrt_concurrency.mjs
+      - run: python -m pip install -r requirements-delivery.txt
+      - name: Configure disposable database
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'nrt-test.json'
+          p.write_text(json.dumps(dict(host='127.0.0.1',port=5432,dbname='nrt_test',user='nrt_test',password='nrt_test')))
+          p.chmod(0o600)
+          PY
+      - name: Parse, batch, recover and verify adapter contracts
+        env:
+          LIVE_IMPORT_TEST_CONFIG: ${{ runner.temp }}/nrt-test.json
+        run: |
+          python -m unittest discover -s tests -p 'test_nrt*.py' -v
+          python -m unittest discover -s tests -p 'test_live*.py' -v
+          python -m unittest discover -s tests -p 'test_*pdf*.py' -v

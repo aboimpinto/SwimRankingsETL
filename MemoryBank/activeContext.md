@@ -1,5 +1,25 @@
 # Active Context
 
+**Resume here:** [8 November unattended-weekend handoff](handoff-nrt-unattended-weekend-2026-11-08.md). Paulo returns before Friday; no background imports are scheduled.
+
+## Current checkpoint — after the completed 8 November trial
+
+See [trial results](../docs/nrt-hour-trial-results-2026-11-08.md): local 58 / AWS 53,
+108 new results, queues clear, timer exited. [Raw-source retention](../docs/source-file-retention.md)
+is documented and AWS records cleanup installed. [Weekend preparation](../docs/nrt-unattended-weekend-plan.md)
+now targets a local unattended runner while the owner is away. No new schedule
+or Codex investigator has been enabled. The initial milestone below is history.
+
+## Historical initial implementation checkpoint — 8 November 2026
+
+The [NRT milestone](../docs/nrt-implementation-milestone-1.md) supersedes older
+statements below about missing documentation/tests. A reusable manual multi-meet
+PDF batch and recovery/verification suite are implemented on the feature branch.
+Local generation 46 passed the real trial; AWS remains at verified 40 with
+explicit deferred delivery. See the milestone for measured scope and limitations.
+
+## Historical repository assessment
+
 ## Current repository state
 
 This checkout is a small, script-only ETL repository with no root documentation, no tests, and no packaging metadata. The code is operationally focused and appears to be used for manual or semi-manual data imports.

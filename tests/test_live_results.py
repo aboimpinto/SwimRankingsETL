@@ -75,6 +75,19 @@ class Sources(unittest.TestCase):
         self.assertEqual(r['rows'][0]['splits'],[{'distance':50,'time_seconds':'35.50'}])
 
 
+    def test_unspecified_individual_event_gender_uses_athlete_not_relay_gender(self):
+        xml=b'''<LENEX><MEETS><MEET name="Synthetic Meeting" city="Meilen" nation="SUI" course="SCM">
+<SESSIONS><SESSION date="2026-09-27"><EVENTS><EVENT eventid="e" number="1" round="TIM"><SWIMSTYLE distance="800" stroke="FREE"/></EVENT></EVENTS></SESSION></SESSIONS>
+<CLUBS><CLUB name="Example Club"><ATHLETES><ATHLETE athleteid="a" firstname="Alice" lastname="EXAMPLE" birthdate="2014-01-01" gender="F" nation="SUI"><RESULTS><RESULT eventid="e" resultid="r" swimtime="00:09:00.00"/></RESULTS></ATHLETE></ATHLETES></CLUB></CLUBS></MEET></MEETS></LENEX>'''
+        for gender in (b'F',b'M'):
+            parsed=parse_lenex(xml.replace(b'gender="F"',b'gender="'+gender+b'"'),MEET,'fixture')
+            self.assertEqual(parsed['rows'][0]['event']['gender'],gender.decode())
+            self.assertEqual(parsed['schedule'][0]['gender'],'U')
+        relay=xml.replace(b'distance="800"',b'distance="50" relaycount="4"')
+        relay=relay.replace(b'</ATHLETES>',b'</ATHLETES><RELAYS><RELAY><RESULTS><RESULT eventid="e" resultid="team" swimtime="00:02:00.00"><RELAYPOSITIONS><RELAYPOSITION athleteid="a" order="1"/></RELAYPOSITIONS></RESULT></RESULTS></RELAY></RELAYS>')
+        parsed=parse_lenex(relay,MEET,'fixture')
+        self.assertEqual(parsed['rows'][0]['event']['gender'],'U')
+
     def test_lenex_explicit_no_time_statuses_preserved(self):
         xml=b'''<LENEX><MEETS><MEET name="Synthetic Meeting" city="Meilen" nation="SUI" course="SCM">
 <SESSIONS><SESSION date="2026-09-27"><EVENTS><EVENT eventid="e" number="1" gender="F" round="TIM"><SWIMSTYLE distance="100" stroke="BREAST"/></EVENT></EVENTS></SESSION></SESSIONS>
@@ -117,6 +130,46 @@ class Database(unittest.TestCase):
     def scalar(self,sql):
         with self.conn.cursor() as c:
             c.execute(sql);return c.fetchone()[0]
+
+    def test_same_source_unspecified_gender_refinement_preserves_race_identity(self):
+        r=report()
+        for row in r['rows']:
+            row.update(source_kind='lenex',nation='SUI',athlete_id='source-'+row['first_name'])
+            row['event']['gender']='U'
+        self.apply(r)
+        original=self.scalar('SELECT min(id) FROM results')
+        corrected=deepcopy(r)
+        for row in corrected['rows']:row['event']['gender']='F'
+        changed=deepcopy(corrected);changed['rows'][0]['time_seconds']='70.00'
+        self.assertIn('receipt_result_mismatch',[h['reason'] for h in build_plan(self.conn,changed)['holds']])
+        self.assertEqual(self.apply(corrected)['counts'],{'update':3})
+        self.assertEqual(self.scalar('SELECT min(id) FROM results'),original)
+        self.assertEqual(self.scalar('SELECT count(*) FROM results'),3)
+        self.assertEqual(self.scalar("SELECT count(*) FROM results r JOIN events e ON e.id=r.event_id WHERE e.gender='F'"),3)
+        self.assertEqual(self.apply(corrected)['counts'],{'unchanged':3})
+
+    def test_new_lenex_revision_updates_unchanged_race_provenance_without_split_rewrites(self):
+        r=report()
+        for row in r['rows']:
+            row.update(source_kind='lenex',nation='SUI',athlete_id='source-'+row['first_name'],splits=[{'distance':50,'time_seconds':'35.5'}])
+        self.apply(r)
+        ids=self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits")
+        for row in r['rows']:row['source_hash']='new-revision'
+        self.assertEqual(self.apply(r)['counts'],{'provenance':3})
+        self.assertEqual(self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits"),ids)
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE club_source='new-revision'"),3)
+        self.assertEqual(self.scalar("SELECT count(*) FROM live_result_imports WHERE source_hash='new-revision'"),3)
+        self.assertEqual(self.apply(r)['counts'],{'unchanged':3})
+
+    def test_same_title_date_different_cities_remain_separate(self):
+        first=report(); a=self.apply(first)
+        second=deepcopy(first)
+        second['meet'].update(live_id='456',city='Nyon')
+        b=self.apply(second)
+        self.assertNotEqual(a['canonical_meet_id'],b['canonical_meet_id'])
+        self.assertEqual(self.apply(first)['counts'],{'unchanged':3})
+        self.assertEqual(self.apply(second)['counts'],{'unchanged':3})
+        self.assertEqual(self.scalar('SELECT count(*) FROM results'),6)
 
     def test_day_one_repeat_day_two_correction_preserves_other_days(self):
         r=report();self.assertEqual(self.apply(r)['counts'],{'insert':3})
