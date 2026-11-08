@@ -1,5 +1,9 @@
 # Near real time swimming results
 
+Current authorization: [one-hour five-minute-cadence trial](nrt-hour-trial-2026-11-08.md).
+The previous stop-for-direction checkpoint below is historical; the owner has
+authorized this finite experiment with a 300-second gate.
+
 Latest measured delta: [23-competition observation and four-result publication](nrt-delta-cohort-2026-11-08.md).
 Local 51 / AWS 46 verified; 209.675 seconds processing exceeded the owner gate.
 Further batches await direction. Initial-load and observed-delta workloads must

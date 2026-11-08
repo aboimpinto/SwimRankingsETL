@@ -1,5 +1,9 @@
 # MemoryBank
 
+Active authorized experiment: [one hour at five-minute cadence](../docs/nrt-hour-trial-2026-11-08.md),
+14:41:54–15:41:54 UTC. The five-minute gate supersedes the earlier three-minute
+gate for this trial only; no permanent cron/service is installed.
+
 Latest owner gate and expansion evidence: [8 November bounded expansion](../docs/nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
 
 This folder captures durable context for `SwimRankingsETL`.
