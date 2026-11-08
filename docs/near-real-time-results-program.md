@@ -1,5 +1,7 @@
 # Near real time swimming results
 
+Latest owner gate and expansion evidence: [8 November bounded expansion](nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
+
 Updated 8 November 2026. This is the central engineering record for the recurring
 weekend trials: owner requirements, measured evidence, design options, operational
 concerns and next experiments. Start here when resuming work; do not reconstruct

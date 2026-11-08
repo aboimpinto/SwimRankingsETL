@@ -1,5 +1,7 @@
 # Manual multi competition PDF batches
 
+Latest owner gate and expansion evidence: [8 November bounded expansion](nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
+
 This milestone provides reusable code for collection, canonical import, one
 combined SwimProfiles publication, and independent verification. It is a manual
 runner, not a continuously running orchestrator. The [implementation record](nrt-implementation-milestone-1.md)

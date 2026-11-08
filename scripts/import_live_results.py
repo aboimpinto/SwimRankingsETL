@@ -38,6 +38,8 @@ def name_key(row):
 
 def identity_key(row):
     fields = [*name_key(row), row.get('club')]
+    if row.get('raw_full_name') is not None:
+        fields.append(['raw_full_name', normalized(row['raw_full_name'])])
     if row.get('birth_year_suffix') is not None:
         fields.append(['birth_year_suffix', row['birth_year_suffix']])
     return digest(fields)
@@ -70,10 +72,12 @@ def build_plan(conn, report, identities=None, days=None):
     with conn.cursor() as cur:
         cur.execute('SELECT id,swimmer_id,first_name,last_name,birth_year,gender,country_code,club_id FROM swimmers')
         swimmers = dicts(cur)
-        by_name, by_id, by_suffix = defaultdict(list), {}, defaultdict(list)
+        by_name, by_id, by_suffix, by_full = defaultdict(list), {}, defaultdict(list), defaultdict(dict)
         for swimmer in swimmers:
             by_name[name_key(swimmer)].append(swimmer)
             by_id[swimmer['id']] = swimmer
+            for full in (swimmer['first_name'] + ' ' + swimmer['last_name'], swimmer['last_name'] + ' ' + swimmer['first_name']):
+                by_full[(normalized(full), swimmer['gender'])][swimmer['id']] = swimmer
             if swimmer['birth_year'] is not None:
                 by_suffix[(normalized(swimmer['first_name']), normalized(swimmer['last_name']), swimmer['gender'], swimmer['birth_year'] % 100)].append(swimmer)
         cur.execute('SELECT source_country_code,source_swimmer_id,swimmer_pk FROM swimmer_aliases')
@@ -130,7 +134,25 @@ def build_plan(conn, report, identities=None, days=None):
         current_events.add((event['number'],event['date'],event['round']))
         candidates = by_name[name_key(row)]
         override = identities.get(identity_key(row))
-        if row['source_kind'] == 'pdf' and row.get('birth_year_suffix') is not None:
+        if row['source_kind'] == 'pdf' and row.get('raw_full_name') is not None:
+            suffix = row.get('birth_year_suffix')
+            if not isinstance(row['raw_full_name'], str) or not normalized(row['raw_full_name']):
+                raise ValueError('Invalid raw PDF full name')
+            if suffix is not None and (type(suffix) is not int or not 0 <= suffix <= 99 or row['birth_year'] is not None):
+                raise ValueError('Invalid full-name PDF year suffix')
+            candidates = list(by_full[(normalized(row['raw_full_name']), row['gender'])].values())
+            candidates = [s for s in candidates if s['birth_year'] is not None and
+                          (s['birth_year'] % 100 == suffix if suffix is not None else s['birth_year'] == row['birth_year'])]
+            if override is not None:
+                candidates = [s for s in candidates if s['id'] == int(override)]
+                if not candidates: raise ValueError('Reviewed full-name identity does not match name/year/gender')
+            if len(candidates) != 1:
+                holds.append({'reason': 'ambiguous_identity' if candidates else 'unknown_identity',
+                              'identity_key': identity_key(row), 'candidate_ids': [s['id'] for s in candidates]})
+                continue
+            match = candidates[0]
+            row = dict(row, first_name=match['first_name'], last_name=match['last_name'], birth_year=match['birth_year'])
+        elif row['source_kind'] == 'pdf' and row.get('birth_year_suffix') is not None:
             suffix = row['birth_year_suffix']
             if type(suffix) is not int or not 0 <= suffix <= 99 or row['birth_year'] is not None:
                 raise ValueError('Invalid unresolved PDF birth-year suffix')

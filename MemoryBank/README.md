@@ -1,5 +1,7 @@
 # MemoryBank
 
+Latest owner gate and expansion evidence: [8 November bounded expansion](../docs/nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
+
 This folder captures durable context for `SwimRankingsETL`.
 
 Start with the [project overview](../README.md) and [desktop-to-AWS delivery runbook](../docs/desktop-incremental-delivery.md). They describe localServer imports, incremental AWS delivery and required refresh acknowledgements from SophiaWalker, Colin and LimmatSharks. Older individual notes may describe earlier repository snapshots.
