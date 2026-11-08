@@ -1,5 +1,10 @@
 # Near real time swimming results
 
+Latest measured delta: [23-competition observation and four-result publication](nrt-delta-cohort-2026-11-08.md).
+Local 51 / AWS 46 verified; 209.675 seconds processing exceeded the owner gate.
+Further batches await direction. Initial-load and observed-delta workloads must
+be reported separately; held layouts still prevent full competition coverage.
+
 Latest owner gate and expansion evidence: [8 November bounded expansion](nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
 
 Updated 8 November 2026. This is the central engineering record for the recurring

@@ -30,6 +30,48 @@ bounded time/size and checks that each URL is actually published by that meet.
 
 ## Collect and preview
 
+### Measure the actual multi-meet delta first
+
+`nrt_delta_observe.py` performs one read-only observation of all linked event PDFs
+in a saved cohort (the JSON list returned by `live_result_sources.discover`,
+filtered to the relevant dates). It uses at most four collection processes,
+one request start per second per process, bounded downloads/parsing and a shared
+time budget. It does not import results or install a scheduler.
+
+```bash
+python3 scripts/nrt_delta_observe.py --meets reports/cohort.json \
+  --output reports/delta/baseline --workers 4
+python3 scripts/nrt_delta_observe.py --meets reports/cohort.json \
+  --previous reports/delta/baseline/observation.json \
+  --output reports/delta/next --delta-output reports/delta/next-sources --workers 4
+```
+
+Each output directory is new and private. The first pass establishes observation
+state; its rows are not evidence of a live delta and may be unimported backlog.
+The next pass separates unchanged bytes, footer-only changes, added/corrected
+results, disappeared rows, first observations and held/failed documents. A
+disappeared row never authorizes deletion. First observations must be reviewed
+against previous link coverage before treating them as newly published results.
+Unsupported documents are coverage gaps, not zero-result competitions.
+
+The optional `--delta-output` stages only added/corrected rows with their checked
+raw evidence. A newly linked PDF is eligible for staging only when the previous
+competition page was successfully observed and did not link it. Recovered or newly
+supported baseline documents stay excluded from live-delta staging. Cross-document
+identity overlap is held. The emitted `delta.json` is **not** a database receipt:
+preview its sources with `nrt_batch.py plan` before using the existing monitored
+local/AWS execution path. Persist delivery receipts independently of observation
+state; a later unchanged source does not acknowledge earlier pending delivery.
+
+For a changed import trial, canonical preview still determines the actual
+database delta and protects stronger evidence/identity rules. Record full
+collection + preview + publication + verification time. Do not import unobserved
+baseline rows as though they arrived in this interval, and do not present an
+unchanged observation as proof of changed-import throughput. A 22-meet cohort
+with twenty new swims is a different workload from initializing 22 meets.
+
+### Selected-document import
+
 First discover current published live IDs/links using the existing source tools.
 Use actual source URLs; the examples below use placeholders intentionally.
 

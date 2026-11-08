@@ -62,13 +62,46 @@ on AWS in 6.174 seconds with the same 284 facts, 274 athletes and 24 groups, zer
 mismatches; AWS maximum checked HTTP latency 520 ms. Cache state was warm, so
 these numbers alone do not establish changed-import improvement.
 
-## Next acceptance run and retained evidence
+## Changed five-meet acceptance result
 
-Collect new published PDFs from the same five competitions and run a changed
-batch through local/AWS with the existing monitoring and 180-second gate. Record
-workload differences rather than claiming a matched speedup. Public timeouts and
-correctness assertions stay unchanged. A breach again stops expansion for owner
-direction.
+Batch `060f386e808a429b88fb783fc4d62c73` completed in **166.905 seconds**, including
+fresh collection/planning, local publication, AWS delivery/publication and
+verification. It accepted 140 new results from selected event PDFs across five
+competitions, with 24 identity holds. This is selected-document coverage, not a
+complete sweep of every event in five meets. All 386 monitored requests passed;
+maximum latency was 1.621 seconds. Local phase took 33.584 seconds; AWS phase
+111.942 seconds, including source delivery 7.314 seconds, cache stage 78.942
+seconds and reader verification 17.386 seconds. Nested stages must not be added
+again to the enclosing totals.
+
+The workload differs from the earlier 121-row batch, so this is an acceptance
+pass, not a controlled speedup percentage. Evidence is in canonical ETL
+`reports/nrt-expansion-2026-11-08/five-meets-optimized-02/summary.json` and
+`aws-stages.json`.
+
+## Capacity concern raised after the pass
+
+The owner correctly distinguished a five-meet batch passing from all active
+competitions remaining fresh. Linear extrapolation of this sample gives about
+334 seconds for ten meets and 734 seconds (12m14s) for 22. These are illustrations,
+not predictions: changed rows, distinct ranking groups and repeated fixed costs
+matter more than meet count alone. No 22-meet near-real-time capacity is proven.
+
+Prioritize measuring the 78.942-second AWS cache stage before adding database
+writers. Collection and verification concurrency cannot alone remove that cost;
+shared database locks and disk contention may make extra writers slower. Keep
+the single-writer contract until a different design is validated. Measure unioned
+dirty ranking keys, unchanged work skipped, per-query cost and fixed per-run work.
+
+Further capacity trials must report oldest unpublished result age, polling delay,
+queue wait, publication latency and backlog trend across repeated bounded cycles,
+as well as each batch duration. Exercise updates arriving during publication and
+unchanged sources without replaying unchanged data as a throughput benchmark.
+Do not claim all active meets are covered from a few selected event PDFs. Keep
+the 180-second stop-and-consult gate, public read timeouts and all correctness
+checks. No unattended scheduler is authorized by this measurement plan.
+
+## Retained evidence
 
 Private evidence: canonical ETL `reports/nrt-optimization-2026-11-08/` contains
 paired query plans/equality; `reports/nrt-expansion-2026-11-08/` contains delivery

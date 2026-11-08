@@ -4,6 +4,11 @@ Latest owner gate and expansion evidence: [8 November bounded expansion](../docs
 
 This folder captures durable context for `SwimRankingsETL`.
 
+Latest checkpoint: [full-cohort small-delta trial](../docs/nrt-delta-cohort-2026-11-08.md).
+Four new results published local 51 / AWS 46 with passing checks. Processing took
+209.675 seconds plus a separate 39.794-second manual handoff; expansion stopped
+and direction was requested. All-source parsing/capacity remains unproven.
+
 Start with the [project overview](../README.md) and [desktop-to-AWS delivery runbook](../docs/desktop-incremental-delivery.md). They describe localServer imports, incremental AWS delivery and required refresh acknowledgements from SophiaWalker, Colin and LimmatSharks. Older individual notes may describe earlier repository snapshots.
 
 Important repo boundary:
@@ -41,8 +46,8 @@ Start with the [program](../docs/near-real-time-results-program.md),
 [manual batch commands](../docs/nrt-manual-batches.md) and
 [milestone evidence](../docs/nrt-implementation-milestone-1.md).
 The collector, recoverable batch runner and SwimProfiles adapters are implemented
-on `feat/nrt-manual-batch`. Local trial: 77 new results, one generation 46
-publication, replay unchanged, checks passed. AWS remains at last verified 40;
-the new local results have a deferred-delivery marker, not an AWS acknowledgment.
+on `feat/nrt-manual-batch`. The initial local trial accepted 77 new results at
+generation 46 and initially deferred AWS delivery. That historical deferral was
+subsequently reconciled; use the latest checkpoint above for current receipts.
 No unattended runner/container is installed. Historical context files below may
 predate the repository's tests and documented runtime.
