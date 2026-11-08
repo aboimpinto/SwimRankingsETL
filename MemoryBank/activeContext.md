@@ -1,5 +1,7 @@
 # Active Context
 
+**Resume here:** [8 November unattended-weekend handoff](handoff-nrt-unattended-weekend-2026-11-08.md). Paulo returns before Friday; no background imports are scheduled.
+
 ## Current checkpoint — after the completed 8 November trial
 
 See [trial results](../docs/nrt-hour-trial-results-2026-11-08.md): local 58 / AWS 53,

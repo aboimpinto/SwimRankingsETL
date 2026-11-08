@@ -1,5 +1,7 @@
 # MemoryBank
 
+**Resume here:** [8 November unattended-weekend handoff](handoff-nrt-unattended-weekend-2026-11-08.md). Paulo returns before Friday; no background imports are scheduled.
+
 Next preparation: [first unattended weekend plan](../docs/nrt-unattended-weekend-plan.md). Owner confirmed the local computer remains on; five-minute scheduling, recovery and alerts are planned, not installed.
 
 Raw source policy: [local retention / AWS cleanup](../docs/source-file-retention.md). Keep local replay files; AWS raw inputs are temporary.
