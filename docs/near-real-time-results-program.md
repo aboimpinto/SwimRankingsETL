@@ -1,8 +1,10 @@
 # Near real time swimming results
 
-Current authorization: [one-hour five-minute-cadence trial](nrt-hour-trial-2026-11-08.md).
-The previous stop-for-direction checkpoint below is historical; the owner has
-authorized this finite experiment with a 300-second gate.
+Latest outcome: [completed one-hour five-minute-cadence trial](nrt-hour-trial-results-2026-11-08.md).
+108 new results published at local 58 / AWS 53; 11 cycles under five minutes,
+one skipped recovery slot and one reader-latency incident. Source coverage is
+incomplete. The finite timer exited; there is no continuing authorization to
+schedule new runs from that expired one-hour window.
 
 Latest measured delta: [23-competition observation and four-result publication](nrt-delta-cohort-2026-11-08.md).
 Local 51 / AWS 46 verified; 209.675 seconds processing exceeded the owner gate.

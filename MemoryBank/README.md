@@ -1,14 +1,16 @@
 # MemoryBank
 
-Active authorized experiment: [one hour at five-minute cadence](../docs/nrt-hour-trial-2026-11-08.md),
-14:41:54–15:41:54 UTC. The five-minute gate supersedes the earlier three-minute
-gate for this trial only; no permanent cron/service is installed.
+Completed experiment: [one-hour trial results](../docs/nrt-hour-trial-results-2026-11-08.md),
+14:41:54–15:41:54 UTC. Eleven cycles executed, one recovery slot skipped; all
+executed cycles under five minutes. 108 new results published, local 58 / AWS 53,
+queues clear. One valid response exceeded two seconds; full source coverage is
+still incomplete. The timer exited; no permanent cron/service is installed.
 
 Latest owner gate and expansion evidence: [8 November bounded expansion](../docs/nrt-expansion-2026-11-08.md). Under 60 s ideal, 60–180 s acceptable; stop expansion and request direction above 180 s.
 
 This folder captures durable context for `SwimRankingsETL`.
 
-Latest checkpoint: [full-cohort small-delta trial](../docs/nrt-delta-cohort-2026-11-08.md).
+Historical checkpoint: [full-cohort small-delta trial](../docs/nrt-delta-cohort-2026-11-08.md).
 Four new results published local 51 / AWS 46 with passing checks. Processing took
 209.675 seconds plus a separate 39.794-second manual handoff; expansion stopped
 and direction was requested. All-source parsing/capacity remains unproven.

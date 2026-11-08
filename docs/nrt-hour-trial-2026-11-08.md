@@ -1,5 +1,8 @@
 # Five-minute cadence trial — 8 November 2026
 
+**Completed:** [results and per-cycle statistics](nrt-hour-trial-results-2026-11-08.md).
+The timer exited at 15:41:54 UTC. No further scheduled starts remain.
+
 The owner explicitly authorized a one-hour run, starting an import every five
 minutes and evaluating whether the active-cohort deltas fit within five minutes.
 This supersedes the previous three-minute stop gate for this bounded experiment.
@@ -70,8 +73,8 @@ and corrections, not sums of cumulative candidates. Report unique held documents
 separately from repeated observations of the same hold. State pending delivery,
 coverage gaps, skipped starts, disk growth and the explicit end of the timer.
 
-The completed outcome is pending while the trial runs. Do not infer success from
-a live process, an unchanged source or an unfinished `trial.json`.
+Use the completed outcome linked above. A live process, unchanged source or
+unfinished `trial.json` must never be treated as completion evidence.
 
 ## Response-time incident during cycle 5
 
