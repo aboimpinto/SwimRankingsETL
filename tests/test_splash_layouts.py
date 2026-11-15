@@ -105,3 +105,9 @@ class LayoutTests(unittest.TestCase):
    result=pdf_job((page,url,tmp,previous,time.monotonic()+10))
   self.assertEqual(result['classification'],'newly-supported-or-recovered')
   self.assertEqual(result['rows'],1);self.assertEqual(result['parserVersion'],PARSER_VERSION)
+
+ def test_continuation_page_without_repeated_columns_keeps_all_rows(self):
+  text='Rang Jg. Zeit Pkt.\n1. EXAMPLE, Alice 14 Club 1:01.39 723\nSplash Meet Manager, 11.85476 14.11.2026 10:00 - Page 1\nFixture meet\nWettkampf 22, Dames, 100m Lagen\n2. EXAMPLE, Bea 14 Club 1:02.39 700\n'
+  r=parse_rows(text,EVENT,'u','h',True,'Fixture meet')
+  self.assertEqual(r['holds'],[]);self.assertEqual([a['first_name']for a in r['rows']],['Alice','Bea'])
+  self.assertTrue(parse_rows(text.replace('Wettkampf 22,','Wettkampf 23,'),EVENT,'u','h',True,'Fixture meet')['holds'])

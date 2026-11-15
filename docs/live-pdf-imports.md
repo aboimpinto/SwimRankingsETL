@@ -17,7 +17,7 @@ table also supplies explicit round, distance, stroke and competition category.
 
 The adapters cover verified German, French, Italian, English/Latvian and Slovak
 Splash individual-result layouts. They share club-before-time row parsing for
-wrapped names/clubs, adjacent columns, two/four-digit birth years, qualification
+wrapped names/clubs, verified continuation pages without repeated column headings, adjacent columns, two/four-digit birth years, qualification
 markers, reaction-time columns and split columns. The legacy time-before-club
 layout remains supported. Language labels and event rounds still require an
 explicit supported adapter and verified schedule metadata.

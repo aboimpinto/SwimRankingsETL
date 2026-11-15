@@ -25,7 +25,7 @@ live-page schedules, not reconstructed race data or LLM extraction.
   same race ID. Official LENEX and externally enriched data remain protected;
   loss of prior PDF details blocks application, including `--allow-held`.
 - Both the normal collector and NRT collector use the language-adapter chain.
-  Parser version `splash-layouts-v7` rechecks unchanged previously held bytes.
+  Parser version `splash-layouts-v8` rechecks unchanged previously held bytes.
 
 ## Captured corpus results
 
@@ -34,9 +34,9 @@ The original corpus contains 403 PDFs from 22 meets, captured on 14 November.
 
 | Captured source | PDFs with accepted individual rows | Explicitly excluded PDFs | Held PDFs | Parsed rows in accepted PDFs |
 | --- | ---: | ---: | ---: | ---: |
-| Allschwil, live 47433 | 28 | 2 | 0 | 1,291 |
+| Allschwil, live 47433 | 28 | 2 | 0 | 1,445 |
 | Lausanne/Prilly short-course nationals, live 49229 | 44 | 2 | 0 | 1,459 |
-| Entire captured corpus | 114 | 19 | 270 | 4,429 |
+| Entire captured corpus | 114 | 19 | 270 | 4,711 |
 
 78 previously held documents now parse. One previously accepted document is now
 held: Slovak live 11154, `ResultList_4.pdf`, contains a 100m result whose displayed
@@ -65,7 +65,7 @@ per-document evidence. Original observations remain under
 
 - Full Python discovery: 288 tests, successful, 27 environment-dependent skips.
   `LIVE_IMPORT_TEST_CONFIG` was supplied for transactional live-import tests.
-- Layout regression suite: 15 tests, successful (including cache-upgrade replay).
+- Layout regression suite: 16 tests, successful (including cache-upgrade replay).
 - NRT concurrency Node suite: 3 tests, successful.
 - Database tests used temporary schemas on the existing local PostgreSQL server
   and rolled back; no live result data was changed and no new database was created.
@@ -79,3 +79,18 @@ not an automatically acknowledged delta baseline: recovery needs an explicit
 preview/apply. Verify affected profiles and unchanged replay before reporting
 publication success. Preserve local original PDFs for replay; AWS must not retain
 raw source files after import, following `source-file-retention.md`.
+
+## Recovery preview caught continuation-page row loss
+
+The canonical replay guard found 103 stored Allschwil races absent from the v7
+parse, although their documents had no parse holds. Those pages repeat the event
+heading but omit the column headings. Version v8 resumes only a matching explicit
+continuation event and tests both retained rows and conflicting event refusal.
+The v7 corpus evidence remains archived privately; the table above is the corrected
+v8 evaluation. Successful document parsing alone did not establish row completeness.
+
+On the fresh 15 November recovery snapshot, all 720 previously imported Allschwil
+races remain represented; replay after the accepted import proposes no mutations.
+New Sunday documents repeating performances across age lists remain explicitly
+held rather than generating duplicate races. The operational recovery receipt is
+separate from this parser validation and must establish downstream publication.

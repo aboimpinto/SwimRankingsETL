@@ -22,16 +22,21 @@ def seconds(value):
 def parse_rows(text,event,source,source_hash,points_label,meet_name=None):
     rows=[];holds=[];excluded=[];seen=set();age=None;last_rank=None;last_finish=None;current=None;segments={}
     provisional=bool(re.search(r'(?:Liste résultats provisoire|Rangliste provisoire|provisional results|predbežné výsledky)',text,re.I))
-    lines=text.splitlines();i=0;columns=[];reaction_column=False;table_started=False
+    lines=text.splitlines();i=0;columns=[];reaction_column=False;table_started=False;seen_table=False
     def fail(message,line):holds.append(message+': '+line.strip())
     while i<len(lines):
         line=lines[i];i+=1;stripped=line.strip()
         if meet_name and ' '.join(stripped.casefold().split())==' '.join(meet_name.casefold().split()):
             table_started=False;continue
         if re.search(r'(?:Rang|Rank)\s+.*?(?:Jg\.|AN\b|YB\b)',line):
-            table_started=True
+            table_started=True;seen_table=True
             columns=[int(n) for n in re.findall(r'\b(\d+)m\b',line)]
             reaction_column=bool(re.search(r'\b(?:TR|RT|R.T.)\b',line));continue
+        continuation=re.match(r'^(?:Wettkampf|Event|Epreuve|gara|disciplína)\s+(\d+),',stripped)
+        if continuation and seen_table:
+            if continuation[1]!=event['number']:fail('Conflicting continuation event',line)
+            else:table_started=True
+            continue
         if not table_started:continue
         if AGE.fullmatch(stripped):age=stripped;last_rank=None;last_finish=None;continue
         # Explicit cumulative split labels may wrap or continue on another line.
