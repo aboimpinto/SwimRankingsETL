@@ -112,6 +112,11 @@ def build_plan(conn, report, identities=None, days=None):
             cur.execute('SELECT r.*, EXISTS(SELECT 1 FROM splits s WHERE s.result_id=r.id) AS has_splits FROM results r WHERE meet_id=%s', (existing_meet['id'],))
             for result in dicts(cur):
                 existing_results[(result['swimmer_id'],result['event_id'])].append(result)
+        actual_splits = defaultdict(list)
+        if existing_meet:
+            cur.execute('SELECT s.result_id,s.distance,s.time_seconds FROM splits s JOIN results r ON r.id=s.result_id WHERE r.meet_id=%s ORDER BY s.distance', (existing_meet['id'],))
+            for result_id,distance,timing in cur.fetchall():
+                actual_splits[result_id].append((distance,Decimal(str(timing))))
         cur.execute("SELECT to_regclass('live_result_imports')")
         ledger = []
         if cur.fetchone()[0]:
@@ -222,7 +227,16 @@ def build_plan(conn, report, identities=None, days=None):
         old = possibilities[0] if possibilities else None
         # Unknown existing canonical races are never overwritten by the weaker PDF source.
         protected = row['source_kind'] == 'pdf' and old and (
-            not previous or previous['source_kind'] == 'lenex' or old['reaction_time'] or old['has_splits'])
+            not previous or previous['source_kind'] == 'lenex'
+            or (old['reaction_time'] is not None and old['reaction_time'] != previous['source_payload'].get('reaction_time'))
+            or (old['has_splits'] and actual_splits[old['id']] != sorted(
+                (s['distance'],Decimal(s['time_seconds'])) for s in previous['source_payload'].get('splits',[]))))
+        if row['source_kind']=='pdf' and previous and not protected:
+            prior=previous['source_payload']
+            if ((prior.get('reaction_time') is not None and row.get('reaction_time') is None)
+                or not {s['distance'] for s in prior.get('splits',[])}.issubset(
+                    {s['distance'] for s in row.get('splits',[])})):
+                holds.append({'reason':'pdf_detail_loss','race_key':key}); continue
         if old and not previous and old['id'] in ledger_by_result and ledger_by_result[old['id']]['race_key'] != key:
             holds.append({'reason':'event_number_or_identity_changed','race_key':key}); continue
         same_payload = previous and previous['payload_hash'] == digest(payload(row))
@@ -255,7 +269,7 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
     if plan['holds'] and not allow_held:
         raise ValueError('Plan contains review holds; explicit --allow-held is required for eligible rows')
     # Regression/identity-key problems are never bypassed by allowing unrelated identity holds.
-    severe = {'previously_imported_races_missing','receipt_result_mismatch','event_number_or_identity_changed','duplicate_race_identity','ambiguous_existing_race'}
+    severe = {'previously_imported_races_missing','receipt_result_mismatch','event_number_or_identity_changed','duplicate_race_identity','ambiguous_existing_race','pdf_detail_loss'}
     if any(isinstance(h,dict) and h.get('reason') in severe for h in plan['holds']):
         raise ValueError('Source regression or race conflict prevents this meet import')
     if not plan['entries']:
@@ -306,16 +320,19 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                 values['points_rudolph'] = None
             if row['source_kind']=='lenex':
                 values.update({k:row.get(k) for k in ('age_group_id','age_group_min','age_group_max','age_group_order','qualification','entry_time_seconds','comment')})
-            # PDFs do not replace richer optional fields; LENEX supplies source values.
+            else:
+                values.update({k:row.get(k) for k in ('qualification','comment')})
+            # Only ledger-owned PDF detail may be replaced; build_plan protects
+            # official or externally enriched results before reaching this point.
             if entry['result_id']:
                 if row['source_kind']=='pdf':
-                    values = {k:v for k,v in values.items() if k not in ('reaction_time','lane','heat','club_name','club_source')}
+                    values = {k:v for k,v in values.items() if k not in ('lane','heat','club_name','club_source')}
                 cur.execute('UPDATE results SET '+','.join(k+'=%s' for k in values)+' WHERE id=%s',[*values.values(),entry['result_id']])
                 result_id=entry['result_id']
             else:
                 cur.execute('INSERT INTO results('+','.join(values)+') VALUES ('+','.join(['%s']*len(values))+') RETURNING id',list(values.values()))
                 result_id=cur.fetchone()[0]
-            if row['source_kind']=='lenex':
+            if row['source_kind'] in ('lenex','pdf'):
                 cur.execute('DELETE FROM splits WHERE result_id=%s',(result_id,))
                 for order,split in enumerate(row['splits'],1):
                     cur.execute('INSERT INTO splits(result_id,distance,time_seconds,split_order) VALUES (%s,%s,%s,%s)',

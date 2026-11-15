@@ -19,13 +19,13 @@ Rang AN Temps Pts 50m 100m
  def test_times_points_status_provenance_and_unknowns(self):
   d=self.parse();self.assertEqual(d['holds'],[]);self.assertEqual(len(d['rows']),2)
   r=d['rows'][0];self.assertEqual((r['time_seconds'],r['points_fina'],r['event']['date'],r['age_group_label']),('62.34',450,'2026-11-08','11 - 12 ans'))
-  self.assertEqual(r['birth_year_suffix'],14);self.assertIsNone(r['birth_year']);self.assertIsNone(r['nation']);self.assertEqual(r['splits'],[]);self.assertEqual(r['source_hash'],'a'*64)
+  self.assertEqual(r['birth_year_suffix'],14);self.assertIsNone(r['birth_year']);self.assertIsNone(r['nation']);self.assertEqual(r['splits'],[{'distance':50,'time_seconds':'30.00'},{'distance':100,'time_seconds':'62.34'}]);self.assertEqual(r['source_hash'],'a'*64)
   self.assertEqual(d['rows'][1]['status'],'DSQ');self.assertIsNone(d['rows'][1]['points_fina'])
  def test_round_required(self):self.assertTrue(self.parse(schedule=[])['holds'])
  def test_multievent_rejected(self):self.assertTrue(self.parse(self.text+'\nEpreuve 402 Dames, 100m Libre')['holds'])
  def test_wrong_date_and_meet_rejected(self):
   self.assertTrue(self.parse(self.text.replace('08.11.2026','09.11.2026'))['holds']);self.assertTrue(self.parse(self.text.replace('Fixture Meeting','Other Meet'))['holds'])
- def test_unknown_nonfinish_held(self):self.assertTrue(self.parse(self.text+'\nforf.nd. EXAMPLE, X 14 Club')['holds'])
+ def test_nonfinish_is_explicitly_excluded(self):self.assertEqual(len(self.parse(self.text+'\nforf.nd. EXAMPLE, X 14 Club')['excluded']),1)
  def test_schedule_exact_round(self):
   h='<table><tr><td>401.</td><td>Messieurs</td><td>100m Libre</td><td>Finale directe</td></tr></table>'
   self.assertEqual(html_schedule(h),self.schedule)
