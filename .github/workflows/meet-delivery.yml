@@ -6,6 +6,9 @@ on:
     paths:
       - scripts/live_result_sources.py
       - scripts/import_live_results.py
+      - scripts/pdf_club_identity.py
+      - scripts/deliver_club_attribution.py
+      - config/pdf-club-identities.json
       - tests/test_live_results.py
       - docs/live-pdf-imports.md
       - README.md

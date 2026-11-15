@@ -11,6 +11,8 @@ on:
       - 'scripts/slovak_splash_pdf.py'
       - 'scripts/splash_*.py'
       - 'scripts/import_live_results.py'
+      - 'scripts/pdf_club_identity.py'
+      - 'config/pdf-club-identities.json'
       - 'scripts/live_result_sources.py'
       - 'scripts/import_live_swimrankings_meet.py'
       - 'scripts/migrate_add_live_result_batches.sql'
@@ -35,6 +37,8 @@ on:
       - 'scripts/slovak_splash_pdf.py'
       - 'scripts/splash_*.py'
       - 'scripts/import_live_results.py'
+      - 'scripts/pdf_club_identity.py'
+      - 'config/pdf-club-identities.json'
       - 'scripts/live_result_sources.py'
       - 'scripts/import_live_swimrankings_meet.py'
       - 'scripts/migrate_add_live_result_batches.sql'
@@ -71,7 +75,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tests/test_nrt_concurrency.mjs
+      - run: node --test tests/test_nrt*.mjs
       - run: python -m pip install -r requirements-delivery.txt
       - name: Configure disposable database
         run: |
