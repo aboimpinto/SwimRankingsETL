@@ -3,6 +3,7 @@ import {required} from '../../scripts/env';
 import {Pool} from 'pg';
 import assert from 'node:assert/strict';
 import {mapLimit} from './nrt_verify_concurrency.mjs';
+import {verifyClubPublication} from './nrt_verify_clubs.mjs';
 import {writeFile} from 'node:fs/promises';
 import {referenceBestsSql} from '../../scripts/fixtures/incremental-import';
 const source=new Pool({connectionString:required('SWIMRANKINGS_DATABASE_URL'),max:1,options:'-c default_transaction_read_only=on -c statement_timeout=30000'});
@@ -42,6 +43,7 @@ try{
  // Facts and bests cover every accepted athlete. Only leaderboard selection is sampled.
  for(const id of [...new Set<string>(meetSaved.map(r=>r.athlete_id))].slice(0,25)) rankingCandidates.add(id);
  }
+ const clubCoverage=await verifyClubPublication(source,target,meets,process.env.LIVE_VERIFY_ORIGIN??'http://127.0.0.1:4340');
  const athletes=[...new Set(saved.map(r=>r.athlete_id))];
  const expected=referenceBestsSql.replace('FROM swimmer_result r JOIN','FROM unnest($1::uuid[]) ids(id) CROSS JOIN LATERAL (SELECT * FROM swimmer_result rr WHERE rr.athlete_id=ids.id AND rr.active OFFSET 0) r JOIN');
  const differences=(await target.query(`WITH expected AS (${expected}), actual AS (SELECT * FROM swimmer_best WHERE athlete_id=ANY($1::uuid[])) SELECT count(*)::int n FROM ((SELECT * FROM actual EXCEPT SELECT * FROM expected) UNION ALL (SELECT * FROM expected EXCEPT SELECT * FROM actual)) d`,[athletes])).rows[0].n;
@@ -79,6 +81,6 @@ try{
    affectedProfileRequests++;
   }
  });
- const report={verificationConcurrency:2,status:'passed',affectedProfiles:profiles.length,affectedProfileRequests,publication,sourceMeetIds:meets.map((m:any)=>m.id),facts:factCount,splits:splitCount,reactions:reactionCount,verifiedRaceDetails:true,athletes:athletes.length,rankingCandidateAthletes:candidates.length,bestDifferences:differences,groups:groups.length,scopes:[...new Set(groups.map(g=>g.scope))],checked,ownChecked,mismatches:0,queryTimings,apiTimings,ms:Math.round(performance.now()-started)};
+ const report={clubCoverage,verificationConcurrency:2,status:'passed',affectedProfiles:profiles.length,affectedProfileRequests,publication,sourceMeetIds:meets.map((m:any)=>m.id),facts:factCount,splits:splitCount,reactions:reactionCount,verifiedRaceDetails:true,athletes:athletes.length,rankingCandidateAthletes:candidates.length,bestDifferences:differences,groups:groups.length,scopes:[...new Set(groups.map(g=>g.scope))],checked,ownChecked,mismatches:0,queryTimings,apiTimings,ms:Math.round(performance.now()-started)};
  console.log(JSON.stringify(report));
 }catch(error){console.error(JSON.stringify({status:'failed',queryTimings,apiTimings,ms:Math.round(performance.now()-started)}));throw error;}finally{await source.end();await target.end();}

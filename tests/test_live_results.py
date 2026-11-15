@@ -131,6 +131,53 @@ class Database(unittest.TestCase):
         with self.conn.cursor() as c:
             c.execute(sql);return c.fetchone()[0]
 
+    def test_pdf_attribution_backfill_preserves_races_splits_and_membership(self):
+        r=report()
+        for row in r['rows']:row['splits']=[{'distance':50,'time_seconds':'35.5'}]
+        self.apply(r)
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE club_name='TEST' AND club_source='abc'"),3)
+        self.assertEqual(self.scalar('SELECT count(*) FROM swimmers WHERE club_id IS NOT NULL'),0)
+        races=self.scalar("SELECT md5(string_agg((to_jsonb(r)-'club_name'-'club_source')::text,',' ORDER BY id)) FROM results r")
+        splits=self.scalar("SELECT md5(string_agg(to_jsonb(s)::text,',' ORDER BY id)) FROM splits s")
+        with self.conn.cursor()as c:c.execute('UPDATE results SET club_name=NULL,club_source=NULL')
+        self.assertEqual(self.apply(r)['counts'],{'provenance':3})
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE club_name='TEST' AND club_source='abc'"),3)
+        self.assertEqual(self.scalar("SELECT md5(string_agg((to_jsonb(r)-'club_name'-'club_source')::text,',' ORDER BY id)) FROM results r"),races)
+        self.assertEqual(self.scalar("SELECT md5(string_agg(to_jsonb(s)::text,',' ORDER BY id)) FROM splits s"),splits)
+        self.assertEqual(self.apply(r)['counts'],{'unchanged':3})
+
+    def test_reviewed_pdf_code_is_scoped_and_does_not_rewrite_splits(self):
+        r=report();self.apply(r)
+        proof=dict(liveIds=['123'],code='TEST',name='Example Club',sourceUrl='https://organizer.test/clubs.pdf',sourceHash='a'*64)
+        r['club_identities']=[proof]
+        self.assertEqual(self.apply(r)['counts'],{'provenance':3})
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE club_name='Example Club' AND club_source='abc'"),3)
+        self.assertEqual(self.scalar("SELECT count(*) FROM live_result_imports WHERE source_payload->'club_identity'->>'sourceHash'='"+'a'*64+"'"),3)
+        self.assertEqual(self.apply(r)['counts'],{'unchanged':3})
+        ambiguous=deepcopy(r);ambiguous['club_identities'].append(proof)
+        with self.assertRaisesRegex(ValueError,'Ambiguous reviewed'):build_plan(self.conn,ambiguous)
+        removed=deepcopy(r);removed['club_identities']=[]
+        with self.assertRaisesRegex(ValueError,'Source regression'):
+            self.apply(removed,allow_held=True)
+
+    def test_pdf_does_not_replace_independently_enriched_club_evidence(self):
+        r=report();self.apply(r)
+        with self.conn.cursor()as c:c.execute("UPDATE results SET club_name='Official Club',club_source='independent-proof'")
+        for row in r['rows']:row['time_seconds']='73.00'
+        self.assertEqual(self.apply(r)['counts'],{'protected':3})
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE club_name='Official Club' AND club_source='independent-proof'"),3)
+
+    def test_pdf_provenance_refresh_and_club_correction_preserve_split_identity(self):
+        r=report()
+        for row in r['rows']:row['splits']=[{'distance':50,'time_seconds':'35.5'}]
+        self.apply(r)
+        ids=self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits")
+        for row in r['rows']:row.update(source_hash='new-pdf',club='Corrected Club')
+        self.assertEqual(self.apply(r)['counts'],{'provenance':3})
+        self.assertEqual(self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits"),ids)
+        self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE club_name='Corrected Club' AND club_source='new-pdf'"),3)
+        self.assertEqual(self.apply(r)['counts'],{'unchanged':3})
+
     def test_same_source_unspecified_gender_refinement_preserves_race_identity(self):
         r=report()
         for row in r['rows']:

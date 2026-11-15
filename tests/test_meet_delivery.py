@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import meet_delivery as d
+from deliver_club_attribution import apply_club_patch
 
 
 def packet():
@@ -296,6 +297,55 @@ class Database(unittest.TestCase):
             d.apply_package(self.conn, p, True)["status"], "already_applied"
         )
         self.assertEqual(self.scalar("SELECT count(*) FROM results"), 2)
+
+    def club_patch_fixture(self):
+        old = packet()
+        d.apply_package(self.conn, old, True)
+        with self.conn.cursor() as cur:
+            cur.execute('UPDATE swimrankings_delivery.meets SET needs_summary_refresh=false')
+        self.conn.commit()
+        new = revised(old)
+        new['payload']['results'][0].update(club_name='Test club', club_source='a' * 64)
+        return old, checksum(new)
+
+    def test_club_patch_preserves_races_and_split_ids_and_replays(self):
+        old, new = self.club_patch_fixture()
+        query = "SELECT jsonb_build_object('results',(SELECT jsonb_agg(to_jsonb(r)-'club_name'-'club_source' ORDER BY id) FROM results r),'splits',(SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM splits s))"
+        before = self.scalar(query)
+        receipt = apply_club_patch(self.conn, old, new, True)
+        self.assertEqual(receipt['changedClubAttributions'], 1)
+        self.assertEqual(self.scalar(query), before)
+        self.assertFalse(self.scalar('SELECT needs_summary_refresh FROM swimrankings_delivery.meets'))
+        self.assertEqual(apply_club_patch(self.conn, old, new, True)['status'], 'already_applied')
+        self.assertEqual(self.scalar('SELECT count(*) FROM swimrankings_delivery.audit'), 2)
+
+    def test_club_patch_dry_run_and_pending_publication(self):
+        old, new = self.club_patch_fixture()
+        apply_club_patch(self.conn, old, new)
+        self.assertEqual(self.scalar('SELECT revision FROM swimrankings_delivery.meets'), 1)
+        self.assertEqual(self.scalar('SELECT count(club_name) FROM results'), 0)
+        with self.conn.cursor() as cur:
+            cur.execute('UPDATE swimrankings_delivery.meets SET needs_summary_refresh=true')
+        self.conn.commit()
+        with self.assertRaisesRegex(ValueError, 'pending normal publication'):
+            apply_club_patch(self.conn, old, new, True)
+
+    def test_club_patch_rejects_non_club_changes_and_conflicts(self):
+        old, new = self.club_patch_fixture()
+        for collection, field, value in [('results', 'time_seconds', '60.00'), ('splits', 'time_seconds', '29.00'), ('swimmers', 'club', 'Other club')]:
+            changed = copy.deepcopy(new)
+            changed['payload'][collection][0][field] = value
+            with self.assertRaisesRegex(ValueError, 'outside race club attribution'):
+                apply_club_patch(self.conn, old, checksum(changed), True)
+        changed = copy.deepcopy(new)
+        changed['previous'] = '0' * 64
+        with self.assertRaisesRegex(ValueError, 'consecutive revisions'):
+            apply_club_patch(self.conn, old, changed, True)
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE results SET club_name='Independent correction'")
+        self.conn.commit()
+        with self.assertRaisesRegex(ValueError, 'outside delivery'):
+            apply_club_patch(self.conn, old, new, True)
 
     def test_dry_run_rolls_back_ledger_and_data(self):
         self.assertEqual(

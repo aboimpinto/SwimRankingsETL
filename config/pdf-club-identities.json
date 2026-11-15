@@ -1,0 +1,10 @@
+[
+  {
+    "liveIds": ["47433", "49229"],
+    "code": "LIMM",
+    "name": "Limmat Sharks Zürich",
+    "sourceUrl": "https://live.swimrankings.net/49229/EntryStatistics.pdf",
+    "sourceHash": "ee605677004262910bd39792c031dd274be4d3738248fd87da67d5f996d8b179",
+    "reason": "Organizer club-code table explicitly identifies LIMM as Limmat Sharks Zürich. Reviewed for these two Swiss meets only; participation still requires that code on each race result."
+  }
+]

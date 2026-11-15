@@ -12,6 +12,7 @@ from pathlib import Path
 
 from live_result_sources import discover, collect, normalized, NO_TIME_STATUSES
 from preview_live_meet import atomic_json
+from pdf_club_identity import resolve_club, club_name, race_payload
 from import_live_swimrankings_meet import ensure_country, ensure_meet, ensure_event, canonical_swimmer_id
 
 LEDGER = '''CREATE TABLE IF NOT EXISTS live_result_imports (
@@ -126,6 +127,7 @@ def build_plan(conn, report, identities=None, days=None):
         ledger_by_result = {r['result_id']:r for r in ledger}
     entries, holds, seen, current_events = [], list(report['holds']), set(), set()
     for row in report['rows']:
+        row = resolve_club(row, meet['live_id'], report.get('club_identities'))
         event = row['event']
         try:
             timing=Decimal(row['time_seconds'])
@@ -228,19 +230,30 @@ def build_plan(conn, report, identities=None, days=None):
         # Unknown existing canonical races are never overwritten by the weaker PDF source.
         protected = row['source_kind'] == 'pdf' and old and (
             not previous or previous['source_kind'] == 'lenex'
+            or ((old.get('club_name') or old.get('club_source')) and
+                (old.get('club_name'), old.get('club_source')) !=
+                (club_name(previous['source_payload']), previous['source_hash']))
             or (old['reaction_time'] is not None and old['reaction_time'] != previous['source_payload'].get('reaction_time'))
             or (old['has_splits'] and actual_splits[old['id']] != sorted(
                 (s['distance'],Decimal(s['time_seconds'])) for s in previous['source_payload'].get('splits',[]))))
         if row['source_kind']=='pdf' and previous and not protected:
             prior=previous['source_payload']
-            if ((prior.get('reaction_time') is not None and row.get('reaction_time') is None)
+            if ((club_name(prior) and not club_name(row))
+                or (prior.get('club_identity') and not row.get('club_identity')
+                    and prior.get('club') == row.get('club'))
+                or (prior.get('reaction_time') is not None and row.get('reaction_time') is None)
                 or not {s['distance'] for s in prior.get('splits',[])}.issubset(
                     {s['distance'] for s in row.get('splits',[])})):
                 holds.append({'reason':'pdf_detail_loss','race_key':key}); continue
         if old and not previous and old['id'] in ledger_by_result and ledger_by_result[old['id']]['race_key'] != key:
             holds.append({'reason':'event_number_or_identity_changed','race_key':key}); continue
         same_payload = previous and previous['payload_hash'] == digest(payload(row))
-        provenance_changed = same_payload and row['source_kind'] == 'lenex' and previous['source_hash'] != row['source_hash']
+        same_race = previous and (same_payload if row['source_kind'] == 'lenex' else
+                                  race_payload(previous['source_payload']) == race_payload(row))
+        attribution_changed = old and (old.get('club_name'), old.get('club_source')) != (
+            club_name(row), row['source_hash'] if club_name(row) else None)
+        provenance_changed = same_race and (not same_payload or attribution_changed
+                                             or previous['source_hash'] != row['source_hash'])
         action = 'protected' if protected else 'provenance' if provenance_changed else 'unchanged' if same_payload else 'update' if old else 'insert'
         entries.append(dict(race_key=key, swimmer_id=swimmer['id'] if swimmer else None, swimmer_key=swimmer_key,
                             result_id=old['id'] if old else None, action=action, row=row,
@@ -290,11 +303,11 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                 continue
             row, event = entry['row'],entry['row']['event']
             if action == 'provenance':
-                # The latest complete file still attests this unchanged race.
-                # Preserve result/split IDs and timing; update only its provenance.
-                cur.execute('UPDATE results SET club_source=%s WHERE id=%s', (row['source_hash'],entry['result_id']))
-                cur.execute('UPDATE live_result_imports SET source_url=%s,source_hash=%s,source_payload=%s::jsonb,imported_at=now() WHERE live_id=%s AND race_key=%s',
-                            (row['source'],row['source_hash'],json.dumps(row),meet['live_id'],entry['race_key']))
+                # Repair attribution on unchanged PDF replay without rewriting races/splits.
+                cur.execute('UPDATE results SET club_name=%s,club_source=%s WHERE id=%s',
+                            (club_name(row),row['source_hash'] if club_name(row) else None,entry['result_id']))
+                cur.execute('UPDATE live_result_imports SET source_url=%s,source_hash=%s,payload_hash=%s,source_payload=%s::jsonb,imported_at=now() WHERE live_id=%s AND race_key=%s',
+                            (row['source'],row['source_hash'],digest(payload(row)),json.dumps(row),meet['live_id'],entry['race_key']))
                 continue
             swimmer_id = entry['swimmer_id'] or new_swimmers.get(entry['swimmer_key'])
             if swimmer_id is None:
@@ -312,8 +325,8 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                           points=row['points_fina'],points_fina=row['points_fina'],reaction_time=row['reaction_time'],
                           age_group_label=row['age_group_label'],age_group_rank=row['age_group_rank'],event_round=event['round'],
                           is_relay=event['is_relay'],relay_count=event['relay_count'],
-                          club_name=row['club'] if row['source_kind']=='lenex' else None,
-                          club_source=row['source_hash'] if row['source_kind']=='lenex' else None)
+                          club_name=club_name(row),
+                          club_source=row['source_hash'] if club_name(row) else None)
             if entry['before'] and (Decimal(str(entry['before']['time_seconds'])) != Decimal(row['time_seconds'])
                                     or entry['before']['status'] != row['status']):
                 # A previously calculated score must not survive a corrected time.
@@ -326,7 +339,7 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
             # official or externally enriched results before reaching this point.
             if entry['result_id']:
                 if row['source_kind']=='pdf':
-                    values = {k:v for k,v in values.items() if k not in ('lane','heat','club_name','club_source')}
+                    values = {k:v for k,v in values.items() if k not in ('lane','heat')}
                 cur.execute('UPDATE results SET '+','.join(k+'=%s' for k in values)+' WHERE id=%s',[*values.values(),entry['result_id']])
                 result_id=entry['result_id']
             else:
