@@ -12,7 +12,7 @@ The importer had explicitly omitted `club_name`/`club_source` for PDF results. T
 
 - Bug: https://github.com/aboimpinto/SwimRankingsETL/issues/49
 - Fix PR: https://github.com/aboimpinto/SwimRankingsETL/pull/50
-- Branch: `fix/pdf-race-club-attribution`, commit `374d451`.
+- Branch: `fix/pdf-race-club-attribution`, implementation commit `374d451`, CI follow-up/head `a88015f`.
 - Checkout used: `../SwimRankingsETL-worktrees/pdf-club-attribution`, relative to the canonical ETL checkout.
 - Dependency chain: PR50 targets `fix/splash-pdf-layouts` (PR48), which targets `feat/nrt-manual-batch` (PR43), which targets `main`.
 - **These code PRs remain separate from the completed database repair. Do not say the fix is merged into main. For further PDF imports use the reviewed fix checkout, not an older importer that omits PDF club evidence.** No scheduler was installed or left running.
@@ -34,7 +34,7 @@ Private evidence remains in the canonical ETL checkout at `reports/club-attribut
 - Browser checks passed both competitions and three views in each environment.
 - Random swimmer verification: 25 requests per environment, zero failures; maximum 160 ms local / 525 ms AWS.
 - Full new verifier bundle passed locally: 2,990 races, 5,723 splits, 1,410 reaction times, 804 athletes, zero best-time differences, 24 ranking groups, 40 affected-profile requests.
-- Tests: 25 live-import tests, 20 delivery tests, six club-verifier tests, four publication-adapter tests. Dedicated temporary delivery test database and credential file removed after success.
+- Tests: 25 live-import tests, 20 delivery tests, six club-verifier tests (nine Node tests including existing concurrency checks), four publication-adapter tests. The new checks are wired into CI, with attribution helper/config changes included in workflow triggers. Dedicated temporary delivery test database and credential file removed after success.
 - One-shot local/AWS publication services finished successfully. No persistent importer/cron was started. No application deployment or timeout change was needed.
 
 ## Remaining coverage and next work
