@@ -9,4 +9,9 @@ def verifier_source():
     if source.count(marker) != 1:
         raise ValueError('Verifier concurrency import changed; update bundler explicitly')
     helper = (root / 'nrt_verify_concurrency.mjs').read_text()
-    return source.replace(marker, helper.replace('export async function mapLimit', 'async function mapLimit', 1))
+    source = source.replace(marker, helper.replace('export async function mapLimit', 'async function mapLimit', 1))
+    club_marker = "import {verifyClubPublication} from './nrt_verify_clubs.mjs';"
+    if source.count(club_marker) != 1:
+        raise ValueError('Verifier club import changed; update bundler explicitly')
+    clubs = (root / 'nrt_verify_clubs.mjs').read_text().replace("import assert from 'node:assert/strict';", '')
+    return source.replace(club_marker, clubs.replace('export async function verifyClubPublication', 'async function verifyClubPublication', 1))
