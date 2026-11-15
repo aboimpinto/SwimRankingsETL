@@ -9,6 +9,7 @@ on:
       - 'scripts/italian_splash_pdf.py'
       - 'scripts/english_splash_pdf.py'
       - 'scripts/slovak_splash_pdf.py'
+      - 'scripts/splash_*.py'
       - 'scripts/import_live_results.py'
       - 'scripts/live_result_sources.py'
       - 'scripts/import_live_swimrankings_meet.py'
@@ -17,6 +18,7 @@ on:
       - 'tests/test_nrt*.mjs'
       - 'tests/test_live*.py'
       - 'tests/test_*pdf*.py'
+      - 'tests/test_splash*.py'
       - 'tests/fixtures/**'
       - 'config/nrt-local.example.json'
       - 'requirements-delivery.txt'
@@ -31,6 +33,7 @@ on:
       - 'scripts/italian_splash_pdf.py'
       - 'scripts/english_splash_pdf.py'
       - 'scripts/slovak_splash_pdf.py'
+      - 'scripts/splash_*.py'
       - 'scripts/import_live_results.py'
       - 'scripts/live_result_sources.py'
       - 'scripts/import_live_swimrankings_meet.py'
@@ -39,6 +42,7 @@ on:
       - 'tests/test_nrt*.mjs'
       - 'tests/test_live*.py'
       - 'tests/test_*pdf*.py'
+      - 'tests/test_splash*.py'
       - 'tests/fixtures/**'
       - 'config/nrt-local.example.json'
       - 'requirements-delivery.txt'
@@ -85,3 +89,4 @@ jobs:
           python -m unittest discover -s tests -p 'test_nrt*.py' -v
           python -m unittest discover -s tests -p 'test_live*.py' -v
           python -m unittest discover -s tests -p 'test_*pdf*.py' -v
+          python -m unittest discover -s tests -p 'test_splash*.py' -v

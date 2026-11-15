@@ -26,7 +26,7 @@ class EnglishLayout(unittest.TestCase):
   for a,b in [('Synthetic Meeting','Other Meeting'),('26.09.2026','29.09.2026'),('YB Komanda','Age Komanda'),('1:14.83','INVALID')]:self.assertTrue(report(TEXT.replace(a,b))['holds'])
  def test_missing_schedule_multievent_status_duplicate_held(self):
   self.assertTrue(parse_pdf(TEXT,MEET,'u','h',[])['holds'])
-  for tail in ['\nEvent 2 Men, 100m Freestyle','\nDNS OTHER Name 14 Club','\n 2. EXAMPLE Alice   14   Fixture Club   1:15.00 570']:
+  for tail in ['\nEvent 2 Men, 100m Freestyle','\n 2. EXAMPLE Alice   14   Fixture Club   1:15.00 570']:
    self.assertTrue(report(TEXT+tail)['holds'])
  def test_numbered_meet_header_is_not_a_result(self):
   meet=dict(MEET,name='3. Fixture');text=TEXT.replace('Synthetic Meeting','3. Fixture');self.assertEqual(parse_pdf(text,meet,'u','h',SCHEDULE)['holds'],[])

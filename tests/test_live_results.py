@@ -185,6 +185,38 @@ class Database(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT count(*) FROM results'),6)
         self.assertEqual(self.scalar("SELECT count(*) FROM results WHERE result_date='2026-09-27'"),3)
 
+    def test_pdf_detail_enrichment_replay_and_correction_preserve_identity(self):
+        r=report();self.apply(r)
+        original=self.scalar('SELECT min(id) FROM results')
+        for row in r['rows']:
+            row.update(reaction_time='0.71',qualification='A',comment='A',splits=[{'distance':50,'time_seconds':'35.50'}])
+        self.assertEqual(self.apply(r)['counts'],{'update':3})
+        self.assertEqual(self.scalar('SELECT count(*) FROM splits'),3)
+        self.assertEqual(self.scalar('SELECT reaction_time FROM results ORDER BY id LIMIT 1'),'0.71')
+        split_ids=self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits")
+        self.assertEqual(self.apply(r)['counts'],{'unchanged':3})
+        self.assertEqual(self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits"),split_ids)
+        r['rows'][0].update(time_seconds='74.50',reaction_time='0.70',splits=[{'distance':50,'time_seconds':'35.40'}])
+        self.assertEqual(self.apply(r)['counts'],{'update':1,'unchanged':2})
+        self.assertEqual(self.scalar('SELECT min(id) FROM results'),original)
+        self.assertEqual(self.scalar('SELECT count(*) FROM results'),3)
+        self.assertEqual(self.scalar('SELECT reaction_time FROM results ORDER BY id LIMIT 1'),'0.70')
+        self.assertEqual(self.scalar('SELECT qualification FROM results ORDER BY id LIMIT 1'),'A')
+        for field,value in [('reaction_time',None),('splits',[])]:
+            less=deepcopy(r);less['rows'][0][field]=value
+            plan=build_plan(self.conn,less)
+            self.assertIn('pdf_detail_loss',[h['reason'] for h in plan['holds']])
+            with self.assertRaises(ValueError):apply_plan(self.conn,less,plan['plan_hash'],allow_held=True)
+
+    def test_pdf_cannot_replace_externally_enriched_details(self):
+        r=report();self.apply(r)
+        with self.conn.cursor() as c:
+            c.execute("UPDATE results SET reaction_time='0.65' WHERE id=(SELECT min(id) FROM results)")
+            c.execute("INSERT INTO splits(result_id,distance,time_seconds,split_order) SELECT max(id),50,35.1,1 FROM results")
+        for row in r['rows']:row.update(reaction_time='0.70',splits=[{'distance':50,'time_seconds':'35.50'}])
+        self.assertEqual(self.apply(r)['counts'],{'protected':2,'update':1})
+        self.assertEqual(self.scalar('SELECT reaction_time FROM results ORDER BY id LIMIT 1'),'0.65')
+
     def test_pdf_lenex_enrichment_retains_ids_and_pdf_cannot_downgrade(self):
         r=report();self.apply(r)
         original=self.scalar('SELECT min(id) FROM results')

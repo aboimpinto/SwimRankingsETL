@@ -19,7 +19,7 @@ class Layout(unittest.TestCase):
         p=report();self.assertEqual(p['holds'],[]);self.assertEqual(len(p['rows']),1)
         r=p['rows'][0];self.assertIsNone(r['birth_year']);self.assertEqual(r['birth_year_suffix'],14)
         self.assertEqual(r['points_fina'],578);self.assertEqual(r['club'],'Example Club 1')
-        self.assertEqual(r['time_seconds'],'74.83');self.assertIsNone(r['nation']);self.assertEqual(r['splits'],[])
+        self.assertEqual(r['time_seconds'],'74.83');self.assertIsNone(r['nation']);self.assertEqual(r['splits'],[{'distance':50,'time_seconds':'35.69'},{'distance':100,'time_seconds':'74.83'}])
     def test_full_year_and_malformed_rows(self):
         r=report(TEXT.replace('    14    ','    2014    '));self.assertEqual(r['rows'][0]['birth_year'],2014)
         self.assertNotIn('birth_year_suffix',r['rows'][0])
@@ -35,7 +35,7 @@ class IdentityAndReplay(Database):
         self.assertEqual(p['counts'],{'insert':1});self.assertEqual(p['entries'][0]['row']['birth_year'],2014);self.assertEqual(r,raw)
         self.apply(r);first=self.scalar('SELECT id FROM results');self.apply(r)
         self.assertEqual(self.scalar('SELECT count(*) FROM results'),1)
-        corrected=report(TEXT.replace('1:14.83','1:14.80'));self.apply(corrected)
+        corrected=report(TEXT.replace('1:14.83','1:14.80').replace('39.14','39.11'));self.apply(corrected)
         self.assertEqual(self.scalar('SELECT id FROM results'),first)
         rich=deepcopy(corrected);row=rich['rows'][0];row.pop('birth_year_suffix');row.update(birth_year=2014,source_kind='lenex',source_hash='lxf-fixture',athlete_id='a',nation='SUI',heat=1,lane=2,reaction_time='0.70',splits=[{'distance':50,'time_seconds':'35.69'}])
         self.apply(rich);self.assertEqual(self.scalar('SELECT id FROM results'),first)

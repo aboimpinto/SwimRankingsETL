@@ -8,7 +8,7 @@ import live_result_sources as base
 STYLES={'Libre':'Freistil','Brasse':'Brust','Dos':'Rücken','Papillon':'Schmetterling','4 nages':'Lagen'}
 GENDERS={'Messieurs':'Herren','Garçons':'Knaben','Dames':'Damen','Filles':'Mädchen'}
 HEADER=re.compile(r'Epreuve\s+(\d+)\s+(Messieurs|Garçons|Dames|Filles),\s+(\d+)m\s+(Libre|Brasse|Dos|Papillon|4 nages)\b')
-ROUNDS={'Finale directe':'TIM','Eliminatoires':'PRE','Éliminatoires':'PRE','Finale':'FIN','Finales':'FIN','Demi-finales':'SEM'}
+ROUNDS={'Série secondaire':'TIM','Série principale':'TIM','Hauptlauf A':'TIM','Finale directe':'TIM','Eliminatoire':'PRE', 'Barrage éliminatoire':'SOP', 'Eliminatoires':'PRE','Éliminatoires':'PRE','Finale':'FIN','Finales':'FIN','Demi-finales':'SEM'}
 
 def html_schedule(html):
  events=base.html_schedule(html)
@@ -31,8 +31,6 @@ def parse_pdf(text,meet,source,source_hash,schedule=None):
  def hold(reason):return dict(rows=[],holds=[reason],excluded=[])
  if len(set(headers))!=1:return hold('Multiple French events in one document need separate verified parsing')
  if not re.search(r'Rang\s+AN\s+Temps\s+Pts\b',text) or 'Liste résultats' not in text:return hold('Unsupported French Splash column layout')
- # Unknown non-finish row shapes must not disappear during label normalization.
- if re.search(r'^\s*(?:forf\.|forfait|abs\.|abandon)',text,re.I|re.M):return hold('French non-finish row requires supported status/time layout')
  converted=HEADER.sub(lambda m:f'Wettkampf {m[1]} {GENDERS[m[2]]}, {m[3]}m {STYLES[m[4]]}',text)
  converted=re.sub(r'Rang\s+AN\s+Temps\s+Pts\b','Rang Jg. Zeit Pkt.',converted)
  converted=converted.replace('Liste résultats','Rangliste')

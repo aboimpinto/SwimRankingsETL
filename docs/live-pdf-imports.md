@@ -15,13 +15,26 @@ table also supplies explicit round, distance, stroke and competition category.
 
 ## Supported data and review holds
 
-The initial PDF adapter supports the verified **German Splash individual-result
-layout**, including category placements, four-digit birth years, recorded DSQ
-times, FINA points and club codes. Relays without verified athlete identities,
-PDF non-finishes without a recorded time, and unsupported layouts are reported
-explicitly. PDF swimmer nationality, reaction time, heat, lane and splits remain
-unknown. Club country is never substituted for nationality. PDF club codes stay
-in the source receipt and do not replace an established full club name.
+The adapters cover verified German, French, Italian, English/Latvian and Slovak
+Splash individual-result layouts. They share club-before-time row parsing for
+wrapped names/clubs, verified continuation pages without repeated column headings, adjacent columns, two/four-digit birth years, qualification
+markers, reaction-time columns and split columns. The legacy time-before-club
+layout remains supported. Language labels and event rounds still require an
+explicit supported adapter and verified schedule metadata.
+
+Explicit provisional lists may omit placements: retain the result with a null
+rank. An unranked row in a non-provisional list must be a verified equal-time tie.
+Start lists, LENEX `ENTRIES` exports, zero finish times, ambiguous rounds, conflicting
+splits and unsupported columns do not become completed swims. Non-finishes without
+recorded times and relays without verified participant identities are explicitly
+excluded, not silently accepted as full coverage.
+
+Reaction time is read only from a declared reaction column. Inline lap intervals
+must reconcile with the finish time before conversion to cumulative splits;
+labelled cumulative splits retain their published distances. Missing splits,
+heat/lane and nationality remain unknown. Club country is never substituted for
+nationality. PDF club text stays in provenance and does not overwrite canonical
+club attribution. See [the November layout validation](pdf-layout-validation-2026-11-15.md).
 
 Only a unique existing name + birth year + competition-category identity can be
 linked automatically from a PDF. Duplicate/unknown identities are held. A private
@@ -33,8 +46,9 @@ conventions. Alias matches are checked against name/year/category/country.
 
 PDF age-category place is stored as `age_group_rank`, not an invented overall
 meet rank. No missing time is replaced with zero. Unsupported nationality,
-age-only/two-digit-birth-year or unverified category fields must be reviewed
-before expanding support to another PDF layout.
+age-only or unverified category fields must be reviewed before expanding support.
+Two-digit birth years and unsplit full names resolve only against a unique existing
+canonical identity; the parser never guesses a century or surname.
 
 ## Preview before commit
 
@@ -102,7 +116,11 @@ calendar dates and one result per day do not prove completion.
 Use **this same importer** when LENEX arrives. It matches an existing PDF race by
 canonical swimmer and source event number/session date/round, updates the same
 result ID, replaces the missing details with source values, and adds splits.
-PDFs cannot downgrade LENEX results. A changed swimmer/event identity is held.
+PDFs cannot downgrade LENEX results. PDF-owned reaction times and splits may be
+added/corrected under the same result ID; identical replay preserves split IDs.
+Externally enriched details remain protected. Losing previously recorded PDF
+splits/reaction time creates a `pdf_detail_loss` hold that `--allow-held` cannot
+bypass. A changed swimmer/event identity is held.
 The older monthly writer still has its cache/skip behavior and does not use this
 new receipt system; do not use it to resume PDF-derived or partial meets.
 

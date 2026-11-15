@@ -9,7 +9,7 @@ from slovak_splash_pdf import parse_pdf, html_schedule
 from live_result_sources import discover, download, result_links, pdf_text
 from nrt_io import atomic_json, bounded_call, digest, locked, now
 
-PARSER_VERSION = 'splash-de-fr-it-en-sk-v6'
+PARSER_VERSION = 'splash-layouts-v8'
 
 
 def semantic_digest(report):

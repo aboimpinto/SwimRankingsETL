@@ -242,10 +242,12 @@ def pdf_text(data):
 
 
 def parse_pdf(text, meet, source, source_hash, schedule=None):
-    """Reject unsupported layouts; do not infer nationality, heat, lane or splits."""
+    """Reject unsupported layouts; only retain explicitly verified race details."""
     if re.search(r'Wettkampf\s+\d+\s+.*?\d+\s*x\s*\d+m', text):
         return {'rows': [], 'holds': [], 'excluded': ['relay PDF: no verified athlete birth years/identities']}
     header = PDF_HEADER.search(text)
+    if len(set(PDF_HEADER.findall(text)))>1:
+        return dict(rows=[],holds=['Multiple events require separate parsing'],excluded=[])
     legacy_layout = bool(re.search(r'Rang\s+Jg\.\s+Zeit\s+Pkt\.\s+CLUB', text))
     full_club_layout = bool(re.search(r'Rang\s+Jg\.\s+Zeit\s+Pkt\.', text)) and not legacy_layout
     if not header or 'Rangliste' not in text or not (legacy_layout or full_club_layout):
@@ -253,16 +255,17 @@ def parse_pdf(text, meet, source, source_hash, schedule=None):
     if normalized(meet['name']) not in normalized(text[:500]):
         return {'rows': [], 'holds': ['PDF meet name does not match discovered competition'], 'excluded': []}
     number, gender, distance, stroke = header.groups()
-    day_match = re.search(r'(\d{2}\.\d{2}\.\d{4})\s*-\s*\d{1,2}:\d{2}', text)
-    if not day_match:
-        return {'rows': [], 'holds': ['PDF event date is missing'], 'excluded': []}
-    day = str(datetime.strptime(day_match[1], '%d.%m.%Y').date())
-    if not meet['start_date'] <= day <= meet['end_date']:
-        return {'rows': [], 'holds': ['PDF event date is outside meet schedule'], 'excluded': []}
+    from splash_pdf_metadata import event_date
+    day=event_date(text,'Rangliste',meet)
+    if day is None:
+        return dict(rows=[],holds=['PDF event date is missing, conflicting or outside meet schedule'],excluded=[])
     event_round = None
     if schedule:
         matching = [e for e in schedule if str(e['number']) == number and e['date'] in (None, day)
                     and e['gender'] == GENDERS[gender] and e['distance'] == int(distance) and e['stroke'] == STROKES[stroke]]
+        labels={'Eliminatoires':'PRE','Éliminatoires':'PRE','Finale':'FIN','Finales':'FIN','Barrage éliminatoire':'SOP'}
+        explicit={code for label,code in labels.items() if re.search(r'Rangliste\s+'+re.escape(label)+r'\b',text)}
+        if len(explicit)==1:matching=[e for e in matching if e['round'] in explicit]
         if len(matching) == 1:
             event_round = matching[0]['round']
     if event_round is None:
@@ -270,6 +273,9 @@ def parse_pdf(text, meet, source, source_hash, schedule=None):
         return {'rows': [], 'holds': ['Round needs verified live-page or LENEX schedule metadata'], 'excluded': []}
     event = dict(number=number, gender=GENDERS[gender], distance=int(distance), stroke=STROKES[stroke],
                  date=day, round=event_round, pool_length=meet['pool_length'], is_relay=False, relay_count=None)
+    if full_club_layout:
+        from splash_result_rows import parse_rows
+        return parse_rows(text,event,source,source_hash,bool(re.search(r'Punkte:\s*(?:FINA|AQUA)\b',text)),meet['name'])
     rows, holds, excluded, identities = [], [], [], set()
     age_label = None
     for line in text.splitlines():
@@ -333,6 +339,8 @@ def parse_lenex(data, meet, source):
     if normalized(meta['name']) != normalized(meet['name']) or meta['pool_length'] != meet['pool_length']:
         raise ValueError('LENEX meet metadata does not match live directory')
     events = lenex_schedule(root, meet)
+    if root.find('./MEETS/MEET').get('status') == 'ENTRIES':
+        return dict(rows=[],holds=[],excluded=['LENEX entry list is not completed race results'],schedule=list(events.values()))
     ranks = build_age_group_rankings(root)
     default_groups = build_event_age_groups(root)
     rows, holds, excluded = [], [], []
@@ -406,6 +414,8 @@ def parse_lenex(data, meet, source):
 
 
 def collect(meet, output):
+    # Local import avoids a cycle: language adapters reuse this module's metadata.
+    from slovak_splash_pdf import parse_pdf as parse_splash_pdf, html_schedule as splash_schedule
     directory = output / meet['live_id']
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     report = dict(meet=meet, rows=[], holds=[], excluded=[], sources=[], recheck_required=True)
@@ -423,16 +433,16 @@ def collect(meet, output):
     except Exception as exc:
         report['sources'].append(dict(kind='lenex', error=str(exc)))
     html = download(meet['url']).decode('utf-8')
-    page_schedule = html_schedule(html)
-    known = {str(e['number']) for e in schedule}
-    schedule += [e for e in page_schedule if e['number'] not in known]
+    page_schedule = splash_schedule(html)
+    known = {(str(e['number']), e['round']) for e in schedule}
+    schedule += [e for e in page_schedule if (e['number'], e['round']) not in known]
     report['sources'].append(dict(url=meet['url'], sha256=sha(html.encode()), kind='html_schedule'))
     links = result_links(html, meet['live_id'])
     for url in links:
         try:
             data = download(url)
             path = directory / (sha(data) + '.pdf'); path.write_bytes(data); path.chmod(0o600)
-            parsed = parse_pdf(pdf_text(data), meet, url, sha(data), schedule)
+            parsed = parse_splash_pdf(pdf_text(data), meet, url, sha(data), schedule)
             report['sources'].append(dict(url=url, sha256=sha(data), kind='pdf', results=len(parsed['rows']), holds=parsed['holds']))
             if parsed['holds']:
                 report['holds'].extend(f'{url}: {h}' for h in parsed['holds'])

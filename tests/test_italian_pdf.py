@@ -25,9 +25,9 @@ Rango An Tempo Pt.
  def test_wrong_meet_date_or_columns_held(self):
   for a,b in [('Fixture Meeting','Other Meet'),('08.11.2026','09.11.2026'),('Rango An Tempo Pt.','Rango An Punti Tempo')]:
    self.assertTrue(self.parse(self.text.replace(a,b))['holds'])
- def test_multievent_and_wrapped_rows_held(self):
+ def test_multievent_held_and_wrapped_rows_supported(self):
   self.assertTrue(self.parse(self.text+'\ngara 33 Ragazzi, 50m Stile Libero')['holds'])
-  self.assertTrue(self.parse(self.text.replace('  28.40 519','\n 28.40 519'))['holds'])
+  self.assertEqual(self.parse(self.text.replace('  28.40 519','\n 28.40 519'))['holds'],[])
  def test_timed_disqualification_keeps_status(self):
   r=self.parse(self.text.replace('1. TEST','squal. TEST'));self.assertEqual(r['holds'],[]);self.assertEqual(r['rows'][0]['status'],'DSQ');self.assertIsNone(r['rows'][0]['age_group_rank'])
  def test_unknown_status_held(self):self.assertTrue(self.parse(self.text+'\nass. TEST, Other 11 Club')['holds'])
