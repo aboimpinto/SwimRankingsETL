@@ -170,6 +170,27 @@ class Database(unittest.TestCase):
         self.assertEqual(self.scalar('SELECT count(*) FROM live_result_import_runs'),receipt_count)
         self.assertEqual(float(self.scalar('SELECT time_seconds FROM results')),2999.00)
 
+    def test_pdf_identity_lookup_keeps_conflicts_even_when_one_prior_key_matches(self):
+        with self.conn.cursor() as c:
+            c.execute("INSERT INTO swimmers(swimmer_id,first_name,last_name,birth_year,gender,country_code) VALUES('other-alice','Alice','Example',2014,'F','HUN') RETURNING id")
+            other=c.fetchone()[0]
+        original=self.scalar("SELECT id FROM swimmers WHERE swimmer_id='alice'")
+        r=report();r['rows']=r['rows'][:1]
+        r['rows'][0]['club']='TEST-A'
+        second=deepcopy(r['rows'][0]);second.update(club='TEST-B',time_seconds='75.00')
+        r['rows'].append(second)
+        identities={identity_key(r['rows'][0]):original,identity_key(second):other}
+        plan=build_plan(self.conn,r,identities)
+        self.assertEqual(plan['holds'],[])
+        self.assertEqual(apply_plan(self.conn,r,plan['plan_hash'],identities)['counts'],{'insert':2})
+        official=deepcopy(r);official['rows']=official['rows'][:1]
+        official['rows'][0].update(source_kind='lenex',nation='SUI',athlete_id='source-alice',source_hash='official')
+        plan=build_plan(self.conn,official)
+        self.assertEqual(sum(h['reason']=='lenex_identity_needs_review' for h in plan['holds']),1)
+        for field,value in [('number','2'),('date','2026-09-27'),('round','FIN')]:
+            independent=deepcopy(official);independent['rows'][0]['event'][field]=value
+            self.assertNotIn('lenex_identity_needs_review',[h['reason'] for h in build_plan(self.conn,independent)['holds']])
+
     def test_pdf_attribution_backfill_preserves_races_splits_and_membership(self):
         r=report()
         for row in r['rows']:row['splits']=[{'distance':50,'time_seconds':'35.5'}]

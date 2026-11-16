@@ -125,6 +125,14 @@ def build_plan(conn, report, identities=None, days=None):
             ledger = dicts(cur)
         ledger_index = {r['race_key']:r for r in ledger}
         ledger_by_result = {r['result_id']:r for r in ledger}
+    # Preserve the provisional-identity guard without rescanning the entire
+    # ledger for every incoming official row (including all-LENEX replays).
+    pdf_identity_keys = defaultdict(set)
+    if any(row['source_kind'] == 'lenex' for row in report['rows']):
+        for prior in ledger:
+            if prior['source_kind'] == 'pdf':
+                pdf_identity_keys[(name_key(prior['source_payload']),prior['event_number'],
+                                   str(prior['event_date']),prior['event_round'])].add(prior['race_key'])
     entries, holds, seen, current_events = [], list(report['holds']), set(), set()
     for row in report['rows']:
         row = resolve_club(row, meet['live_id'], report.get('club_identities'))
@@ -192,10 +200,8 @@ def build_plan(conn, report, identities=None, days=None):
         swimmer = candidates[0] if candidates else None
         swimmer_key = swimmer['swimmer_id'] if swimmer else canonical_swimmer_id(row['nation'],row['gender'],row['birth_year'],row['first_name'],row['last_name'])
         key = race_key(row, swimmer_key)
-        if row['source_kind']=='lenex' and any(
-            prior['source_kind']=='pdf' and name_key(prior['source_payload'])==name_key(row)
-            and prior['event_number']==event['number'] and str(prior['event_date'])==event['date']
-            and prior['event_round']==event['round'] and prior['race_key']!=key for prior in ledger):
+        prior_pdf_keys = pdf_identity_keys.get((name_key(row),event['number'],event['date'],event['round'])) if row['source_kind']=='lenex' else None
+        if prior_pdf_keys and (len(prior_pdf_keys)>1 or key not in prior_pdf_keys):
             holds.append({'reason':'lenex_identity_needs_review','identity_key':identity_key(row)})
             continue
         if key in seen:
