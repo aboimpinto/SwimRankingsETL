@@ -131,6 +131,45 @@ class Database(unittest.TestCase):
         with self.conn.cursor() as c:
             c.execute(sql);return c.fetchone()[0]
 
+    def test_batched_splits_preserve_order_corrections_replay_and_failure(self):
+        import psycopg2
+        r=report();r['rows']=r['rows'][:1]
+        row=r['rows'][0]
+        row.update(source_kind='lenex',nation='SUI',athlete_id='source-alice',time_seconds='3000.00',
+                   splits=[dict(distance=25*n,time_seconds=str(15*n)) for n in range(1,121)])
+        row['event'].update(distance=3000,stroke='FREE')
+        # New results must not issue a split DELETE, even an empty one.
+        with self.conn.cursor() as c:
+            c.execute("CREATE FUNCTION reject_split_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'unexpected split delete'; END $$")
+            c.execute('CREATE TRIGGER reject_split_delete BEFORE DELETE ON splits FOR EACH STATEMENT EXECUTE FUNCTION reject_split_delete()')
+        self.assertEqual(self.apply(r)['counts'],{'insert':1})
+        with self.conn.cursor() as c:
+            c.execute('DROP TRIGGER reject_split_delete ON splits')
+            c.execute('SELECT distance,time_seconds,split_order FROM splits ORDER BY split_order')
+            self.assertEqual([(d,float(t),o) for d,t,o in c.fetchall()],[(25*n,float(15*n),n) for n in range(1,121)])
+        result_id=self.scalar('SELECT id FROM results')
+        ids=self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits")
+        self.assertEqual(self.apply(r)['counts'],{'unchanged':1})
+        self.assertEqual(self.scalar("SELECT string_agg(id::text,',' ORDER BY id) FROM splits"),ids)
+        row.update(source_hash='corrected',time_seconds='2999.00',splits=row['splits'][:3])
+        self.assertEqual(self.apply(r)['counts'],{'update':1})
+        self.assertEqual(self.scalar('SELECT id FROM results'),result_id)
+        self.assertEqual(self.scalar('SELECT count(*) FROM splits'),3)
+        before=self.scalar("SELECT md5(string_agg(to_jsonb(s)::text,',' ORDER BY id)) FROM splits s")
+        receipt_count=self.scalar('SELECT count(*) FROM live_result_import_runs')
+        with self.conn.cursor() as c:
+            c.execute("CREATE FUNCTION reject_second_split() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.split_order=101 THEN RAISE EXCEPTION 'injected split failure'; END IF; RETURN NEW; END $$")
+            c.execute('CREATE TRIGGER reject_second_split BEFORE INSERT ON splits FOR EACH ROW EXECUTE FUNCTION reject_second_split()')
+            c.execute('SAVEPOINT failing_import')
+        row.update(source_hash='failed-correction',time_seconds='2998.00',
+                   splits=[dict(distance=25*n,time_seconds=str(15*n)) for n in range(1,121)])
+        with self.assertRaisesRegex(psycopg2.Error,'injected split failure'):
+            self.apply(r)
+        with self.conn.cursor() as c:c.execute('ROLLBACK TO SAVEPOINT failing_import')
+        self.assertEqual(self.scalar("SELECT md5(string_agg(to_jsonb(s)::text,',' ORDER BY id)) FROM splits s"),before)
+        self.assertEqual(self.scalar('SELECT count(*) FROM live_result_import_runs'),receipt_count)
+        self.assertEqual(float(self.scalar('SELECT time_seconds FROM results')),2999.00)
+
     def test_pdf_attribution_backfill_preserves_races_splits_and_membership(self):
         r=report()
         for row in r['rows']:row['splits']=[{'distance':50,'time_seconds':'35.5'}]
