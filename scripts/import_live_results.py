@@ -125,6 +125,14 @@ def build_plan(conn, report, identities=None, days=None):
             ledger = dicts(cur)
         ledger_index = {r['race_key']:r for r in ledger}
         ledger_by_result = {r['result_id']:r for r in ledger}
+    # Preserve the provisional-identity guard without rescanning the entire
+    # ledger for every incoming official row (including all-LENEX replays).
+    pdf_identity_keys = defaultdict(set)
+    if any(row['source_kind'] == 'lenex' for row in report['rows']):
+        for prior in ledger:
+            if prior['source_kind'] == 'pdf':
+                pdf_identity_keys[(name_key(prior['source_payload']),prior['event_number'],
+                                   str(prior['event_date']),prior['event_round'])].add(prior['race_key'])
     entries, holds, seen, current_events = [], list(report['holds']), set(), set()
     for row in report['rows']:
         row = resolve_club(row, meet['live_id'], report.get('club_identities'))
@@ -192,10 +200,8 @@ def build_plan(conn, report, identities=None, days=None):
         swimmer = candidates[0] if candidates else None
         swimmer_key = swimmer['swimmer_id'] if swimmer else canonical_swimmer_id(row['nation'],row['gender'],row['birth_year'],row['first_name'],row['last_name'])
         key = race_key(row, swimmer_key)
-        if row['source_kind']=='lenex' and any(
-            prior['source_kind']=='pdf' and name_key(prior['source_payload'])==name_key(row)
-            and prior['event_number']==event['number'] and str(prior['event_date'])==event['date']
-            and prior['event_round']==event['round'] and prior['race_key']!=key for prior in ledger):
+        prior_pdf_keys = pdf_identity_keys.get((name_key(row),event['number'],event['date'],event['round'])) if row['source_kind']=='lenex' else None
+        if prior_pdf_keys and (len(prior_pdf_keys)>1 or key not in prior_pdf_keys):
             holds.append({'reason':'lenex_identity_needs_review','identity_key':identity_key(row)})
             continue
         if key in seen:
@@ -274,6 +280,7 @@ def build_plan(conn, report, identities=None, days=None):
 
 def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_held=False):
     """Replan under a transaction lock and require the reviewed hash before writes."""
+    from psycopg2.extras import execute_values
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtext('live_results_import'))")
     plan = build_plan(conn,report,identities,days)
@@ -346,10 +353,17 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                 cur.execute('INSERT INTO results('+','.join(values)+') VALUES ('+','.join(['%s']*len(values))+') RETURNING id',list(values.values()))
                 result_id=cur.fetchone()[0]
             if row['source_kind'] in ('lenex','pdf'):
-                cur.execute('DELETE FROM splits WHERE result_id=%s',(result_id,))
-                for order,split in enumerate(row['splits'],1):
-                    cur.execute('INSERT INTO splits(result_id,distance,time_seconds,split_order) VALUES (%s,%s,%s,%s)',
-                                (result_id,split['distance'],split['time_seconds'],order))
+                # New result IDs cannot have prior splits. Existing-result
+                # corrections still replace all owned detail transactionally.
+                if entry['result_id']:
+                    cur.execute('DELETE FROM splits WHERE result_id=%s',(result_id,))
+                # Bound memory and SQL size to one race, with at most 100 splits
+                # per statement. Retain explicit source ordering and parameters.
+                if row['splits']:
+                    execute_values(cur,
+                        'INSERT INTO splits(result_id,distance,time_seconds,split_order) VALUES %s',
+                        [(result_id,split['distance'],split['time_seconds'],order)
+                         for order,split in enumerate(row['splits'],1)],page_size=100)
             cur.execute('''INSERT INTO live_result_imports(live_id,race_key,result_id,event_number,event_date,event_round,source_kind,source_url,source_hash,payload_hash,source_payload)
                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
                  ON CONFLICT(live_id,race_key) DO UPDATE SET source_kind=EXCLUDED.source_kind,source_url=EXCLUDED.source_url,
