@@ -96,3 +96,9 @@ retry behavior against an isolated PostgreSQL database. Local database tests
 require the guarded test configuration documented in the delivery runbook.
 Website repositories test their refresh endpoints, ranking rules, cache
 publication and archive preservation separately.
+
+### Compact downstream synchronization
+
+An optional [ETL-owned fingerprint projection](docs/compact-sync.md) lets
+SwimProfiles select changed payloads before transfer. Supported writers maintain
+it when installed; the guarded CLI seeds/drains bounded batches.
