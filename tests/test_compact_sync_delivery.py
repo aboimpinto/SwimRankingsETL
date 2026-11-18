@@ -61,6 +61,25 @@ class CompactSync(unittest.TestCase):
         self.assertEqual(before,self.value('SELECT fingerprint FROM swim_sync_result WHERE result_id=1'))
         self.execute('UPDATE results SET event_id=999 WHERE id=1')
         with self.assertRaisesRegex(Exception,'Incomplete sync source dependencies'): refresh_if_installed(self.conn)
+    def test_locked_writer_keys_remain_pending_without_blocking_refresh(self):
+        import psycopg2
+        other=psycopg2.connect(**json.loads(Path(os.environ['DELIVERY_TEST_CONFIG']).read_text()))
+        try:
+            self.execute('UPDATE results SET time_seconds=59 WHERE id=1')
+            # A writer/repair holding an existing queue key must not stall a refresh.
+            self.value('SELECT result_id FROM swim_sync_dirty WHERE result_id=1 FOR UPDATE')
+            with other.cursor() as c:
+                c.execute('SET search_path TO '+self.schema+'; SET statement_timeout=1000')
+            report=refresh_if_installed(other,500,1)
+            self.assertEqual(report['processed'],1)
+            self.assertTrue(report['pending'])
+            other.commit()
+            self.conn.rollback()
+            self.assertFalse(refresh_if_installed(other)['pending'])
+            other.commit()
+        finally:
+            other.close()
+
     def test_uninstalled_is_optional(self):
         self.execute('DROP FUNCTION swim_sync_refresh(integer)')
         self.assertEqual(refresh_if_installed(self.conn),{'installed':False})

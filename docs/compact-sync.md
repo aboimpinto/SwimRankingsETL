@@ -44,7 +44,7 @@ source database. Keep writer configuration outside tracked files.
   rows. Triggers enqueue result/split changes, relevant identity changes and
   meet/event metadata updates. An identical row update is ignored.
 - `swim_sync_refresh(batch_size)`: updates only queued IDs and removes deleted
-  results. It serializes refreshes and refuses incomplete source dependencies.
+  results. It serializes refreshes, skips queue keys locked by concurrent writers (leaving them pending), and refuses incomplete source dependencies.
   Result and split modifications, dirty state and refresh roll back together.
 
 Consumers must read contract readiness and fingerprints in the same repeatable-read
