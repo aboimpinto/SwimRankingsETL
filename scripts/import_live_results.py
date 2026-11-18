@@ -256,6 +256,8 @@ def apply_plan(conn, report, expected_hash, identities=None, days=None, allow_he
                 cur.execute('UPDATE swimmers SET club_id=%s WHERE id=%s',(club_id,swimmer_id))
         receipt = dict(live_id=meet['live_id'],canonical_meet_id=meet_id,counts=dict(counts),
                        held=len(plan['holds']),excluded=len(plan['excluded']),plan_hash=expected_hash,recheck_required=True)
+        from compact_sync import refresh_if_installed
+        receipt['compact_sync'] = refresh_if_installed(conn)
         cur.execute('INSERT INTO live_result_import_runs(live_id,plan_hash,receipt) VALUES (%s,%s,%s::jsonb)',(meet['live_id'],expected_hash,json.dumps(receipt)))
     return receipt
 

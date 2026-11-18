@@ -34,3 +34,9 @@ Read the country-records runbook for source mapping, preview evidence and actual
 local/AWS publication state. No scheduler is to be configured.
 
 For each weekly records refresh, follow the [manual operator checklist](../docs/weekly-record-refresh.md). It documents the installed entry points, preview review, matching local/AWS delivery, receipt verification and retries; scheduling remains disabled.
+
+## Compact sync provider — 18 November 2026
+
+See [the contract and writer runbook](../docs/compact-sync.md) for issue #54.
+Explicit installation only; local owned-schema validation does not activate AWS.
+Pending NRT PRs #43/#48/#50/#53 remain separate from this main-based provider.

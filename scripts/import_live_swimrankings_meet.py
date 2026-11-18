@@ -1037,8 +1037,11 @@ def import_live_meet(args: argparse.Namespace) -> Dict[str, object]:
             (raw_file_name, len(unique_swimmers), len(deduped_rows)),
         )
 
+        from compact_sync import refresh_if_installed
+        compact_sync = refresh_if_installed(conn)
         conn.commit()
         return {
+            'compact_sync': compact_sync,
             "saved_path": str(saved_path) if saved_path else None,
             "meet_name": meet_name,
             "meet_date": meet_date,

@@ -684,6 +684,8 @@ def apply_package(conn, packet, commit=False, adopt_existing=False):
                 "UPDATE swimrankings_delivery.meets SET affected_from=%s WHERE publisher=%s AND meet_key=%s",
                 (affected_from, publisher, key),
             )
+        from compact_sync import refresh_if_installed
+        report['compact_sync'] = refresh_if_installed(conn)
         if commit:
             conn.commit()
         else:

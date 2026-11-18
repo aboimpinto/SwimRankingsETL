@@ -118,6 +118,25 @@ class Database(unittest.TestCase):
         with self.conn.cursor() as c:
             c.execute(sql);return c.fetchone()[0]
 
+    def test_installed_compact_projection_follows_partial_pdf_and_lenex_enrichment(self):
+        with self.conn.cursor() as cur:
+            cur.execute((Path(__file__).resolve().parents[1]/'scripts/compact_sync.sql').read_text())
+        r=report()
+        receipt=self.apply(r)
+        self.assertEqual(receipt['compact_sync']['changed'],3)
+        self.assertEqual(self.scalar('SELECT count(*) FROM swim_sync_result'),3)
+        partial=deepcopy(r);partial['rows']=partial['rows'][:1]
+        with self.assertRaisesRegex(ValueError,'review holds'):
+            self.apply(partial)
+        self.assertEqual(self.scalar('SELECT count(*) FROM swim_sync_result'),3)
+        rich=deepcopy(r)
+        for row in rich['rows']:
+            row.update(source_kind='lenex',nation='SUI',athlete_id='source-'+row['first_name'],reaction_time='+0.71',splits=[{'distance':50,'time_seconds':'35.5'}])
+        enriched=self.apply(rich)
+        self.assertEqual(enriched['compact_sync']['changed'],3)
+        self.assertEqual(self.scalar('SELECT count(*) FROM swim_sync_dirty'),0)
+        self.assertEqual(self.apply(rich)['compact_sync']['processed'],0)
+
     def test_day_one_repeat_day_two_correction_preserves_other_days(self):
         r=report();self.assertEqual(self.apply(r)['counts'],{'insert':3})
         self.assertEqual(self.apply(r)['counts'],{'unchanged':3})

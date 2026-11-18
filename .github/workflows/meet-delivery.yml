@@ -4,6 +4,9 @@ on:
     branches: [main, feat/desktop-incremental-delivery]
   pull_request:
     paths:
+      - scripts/compact_sync.py
+      - scripts/compact_sync.sql
+      - tests/test_compact_sync_delivery.py
       - scripts/live_result_sources.py
       - scripts/import_live_results.py
       - tests/test_live_results.py
