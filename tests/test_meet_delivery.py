@@ -4,6 +4,8 @@ import copy
 import gzip
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -189,11 +191,47 @@ class Validation(unittest.TestCase):
             with patch.object(d.subprocess, "run", side_effect=run) as transport:
                 self.assertEqual(d.push(args)["uploaded"], 0)
                 self.assertEqual(
-                    sum(c.args[0][0] == "scp" for c in transport.call_args_list), 1
+                    sum(c.args[0][0] == "scp" for c in transport.call_args_list), 3
                 )
                 self.assertFalse(
                     any(" apply " in c.args[0][-1] for c in transport.call_args_list)
                 )
+
+    def test_remote_runtime_contains_sync_dependency_with_and_without_publication(self):
+        # Exercise only files actually uploaded, outside the checkout/PYTHONPATH.
+        for publish in (None, "/srv/private/consumers.json"):
+            with self.subTest(publish=publish), tempfile.TemporaryDirectory() as folder:
+                receiver = Path(folder) / "receiver"
+                receiver.mkdir()
+                uploads = []
+                args = SimpleNamespace(
+                    directory=folder, ssh_host="aws-swimming", remote_dir="/srv/delivery",
+                    remote_config="/srv/private/db.json", expect_host="localhost",
+                    expect_database="swimrankings", commit=True, publish_config=publish,
+                )
+
+                def run(argv, **kwargs):
+                    if argv[0] == "scp":
+                        source = Path(argv[2])
+                        uploads.append((source.name, argv[-1]))
+                        shutil.copyfile(source, receiver / source.name)
+                    return SimpleNamespace(stdout=(
+                        "[]" if argv[0] == "ssh" and " status " in argv[-1] else
+                        "{}" if argv[0] == "ssh" and " publish " in argv[-1] else ""
+                    ))
+
+                with patch.object(d.subprocess, "run", side_effect=run):
+                    self.assertEqual(d.push(args)["uploaded"], 0)
+                self.assertEqual(len(uploads), 6 if publish else 3)
+                self.assertEqual(len({destination.rsplit("/", 1)[0] for _, destination in uploads}), 1)
+                self.assertTrue(all("/runtime-" in destination for _, destination in uploads))
+                self.assertTrue((receiver / "compact_sync.sql").is_file())
+                subprocess.run([
+                    sys.executable, "-I", "-c",
+                    "import sys; sys.path.insert(0,sys.argv[1]); "
+                    "import compact_sync; "
+                    "assert callable(compact_sync.refresh_if_installed)", str(receiver),
+                ], cwd=receiver, check=True, capture_output=True, text=True)
 
     def test_push_transport_failure_stops_before_apply(self):
         with tempfile.TemporaryDirectory() as folder:

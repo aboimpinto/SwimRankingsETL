@@ -102,3 +102,15 @@ fingerprints match the released normalized result export. Change both copies whe
 changing contract normalization, and bump the contract/version for incompatible
 changes. Installation, data preparation, local activation and AWS activation are
 separate from source merge; none is performed automatically by deployment.
+
+## AWS receiver packaging — issue #58
+
+`meet_delivery.py push` now always uploads a content-addressed runtime containing
+`meet_delivery.py`, `compact_sync.py` and its SQL contract. Publication mode also
+includes its three existing publication dependencies. Connection configuration
+stays on the receiver. Copying these files does not install/reseed the projection.
+
+The previous raw push copied only the receiver script and the publication bundle
+also omitted the provider; either could fail with `ModuleNotFoundError` on a fresh
+AWS receiver after the new writer hook was merged. Regression verification loads
+only the uploaded files in an isolated Python process, for both push modes.

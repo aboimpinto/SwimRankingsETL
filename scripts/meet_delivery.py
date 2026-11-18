@@ -750,31 +750,20 @@ def push(args):
     python = getattr(args, "remote_python", "python3")
     ssh([python, "-c", "import psycopg2"])
     ssh(["mkdir", "-p", args.remote_dir])
+    # The receiver imports compact_sync even before a projection is installed.
+    # Always ship a complete, content-addressed runtime, including raw-only push.
     runner = Path(__file__).resolve()
-    remote_runner = f"{args.remote_dir}/meet_delivery-{hashlib.sha256(runner.read_bytes()).hexdigest()}.py"
+    names = ["compact_sync.py", "compact_sync.sql"]
     if getattr(args, "publish_config", None):
-        files = [
-            runner,
-            *[
-                runner.with_name(name)
-                for name in (
-                    "publish_delivery.py",
-                    "delivery_summaries.py",
-                    "delivery_summary_schema.sql",
-                )
-            ],
-        ]
-        bundle = digest(
-            [hashlib.sha256(path.read_bytes()).hexdigest() for path in files]
-        )
-        runtime = f"{args.remote_dir}/runtime-{bundle}"
-        ssh(["mkdir", "-p", runtime])
-        for path in files:
-            scp(path, f"{runtime}/{path.name}.part")
-            ssh(["mv", f"{runtime}/{path.name}.part", f"{runtime}/{path.name}"])
-        remote_runner = f"{runtime}/meet_delivery.py"
-    else:
-        scp(runner, remote_runner)
+        names += ["publish_delivery.py", "delivery_summaries.py", "delivery_summary_schema.sql"]
+    files = [runner, *[runner.with_name(name) for name in names]]
+    bundle = digest([hashlib.sha256(path.read_bytes()).hexdigest() for path in files])
+    runtime = f"{args.remote_dir}/runtime-{bundle}"
+    ssh(["mkdir", "-p", runtime])
+    for path in files:
+        scp(path, f"{runtime}/{path.name}.part")
+        ssh(["mv", f"{runtime}/{path.name}.part", f"{runtime}/{path.name}"])
+    remote_runner = f"{runtime}/meet_delivery.py"
     common = [
         "--config",
         args.remote_config,
