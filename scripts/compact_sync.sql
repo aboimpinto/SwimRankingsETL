@@ -55,7 +55,7 @@ DECLARE ids bigint[]; changed bigint; removed bigint; remaining boolean;
 BEGIN
  IF batch_size<1 OR batch_size>5000 THEN RAISE EXCEPTION 'Invalid sync batch size'; END IF;
  PERFORM pg_advisory_xact_lock(734342);
- SELECT array_agg(result_id) INTO ids FROM (SELECT result_id FROM swim_sync_dirty ORDER BY result_id LIMIT batch_size FOR UPDATE) k;
+ SELECT array_agg(result_id) INTO ids FROM (SELECT result_id FROM swim_sync_dirty ORDER BY result_id LIMIT batch_size FOR UPDATE SKIP LOCKED) k;
  IF ids IS NOT NULL THEN
   DELETE FROM swim_sync_result s WHERE s.result_id=ANY(ids) AND NOT EXISTS(SELECT 1 FROM results r WHERE r.id=s.result_id);
   GET DIAGNOSTICS removed=ROW_COUNT;
