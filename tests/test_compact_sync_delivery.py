@@ -66,6 +66,8 @@ class CompactSync(unittest.TestCase):
         other=psycopg2.connect(**json.loads(Path(os.environ['DELIVERY_TEST_CONFIG']).read_text()))
         try:
             self.execute('UPDATE results SET time_seconds=59 WHERE id=1')
+            # A writer/repair holding an existing queue key must not stall a refresh.
+            self.value('SELECT result_id FROM swim_sync_dirty WHERE result_id=1 FOR UPDATE')
             with other.cursor() as c:
                 c.execute('SET search_path TO '+self.schema+'; SET statement_timeout=1000')
             report=refresh_if_installed(other,500,1)
